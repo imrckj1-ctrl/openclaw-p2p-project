@@ -1,9 +1,12 @@
 package com.imr.chat.ui.components
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material3.*
@@ -21,7 +24,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.viewinterop.AndroidView
 
 @Composable
 fun MarkdownRenderer(
@@ -29,20 +31,24 @@ fun MarkdownRenderer(
     modifier: Modifier = Modifier,
     isDarkTheme: Boolean = false
 ) {
-    // Split content into code blocks and text segments
     val segments = remember(content) { parseMarkdownSegments(content) }
 
-    Column(modifier = modifier) {
-        segments.forEach { segment ->
-            when (segment) {
-                is MarkdownSegment.CodeBlock -> {
-                    CodeBlockWidget(
-                        code = segment.code,
-                        language = segment.language
-                    )
-                }
-                is MarkdownSegment.Text -> {
-                    RichTextContent(segment.text, isDarkTheme)
+    SelectionContainer(modifier = modifier) {
+        Column {
+            segments.forEach { segment ->
+                when (segment) {
+                    is MarkdownSegment.CodeBlock -> {
+                        CodeBlockWidget(
+                            code = segment.code,
+                            language = segment.language
+                        )
+                    }
+                    is MarkdownSegment.Table -> {
+                        TableWidget(segment)
+                    }
+                    is MarkdownSegment.Text -> {
+                        RichTextContent(segment.text, isDarkTheme)
+                    }
                 }
             }
         }
@@ -51,38 +57,136 @@ fun MarkdownRenderer(
 
 sealed class MarkdownSegment {
     data class CodeBlock(val code: String, val language: String?) : MarkdownSegment()
+    data class Table(val header: List<String>, val rows: List<List<String>>) : MarkdownSegment()
     data class Text(val text: String) : MarkdownSegment()
 }
 
 fun parseMarkdownSegments(content: String): List<MarkdownSegment> {
     val segments = mutableListOf<MarkdownSegment>()
-    val codeBlockRegex = Regex("```(\\w*)\\n([\\s\\S]*?)```")
-    var lastIndex = 0
+    val lines = content.split("\n")
+    var i = 0
 
-    for (match in codeBlockRegex.findAll(content)) {
-        // Text before code block
-        if (match.range.first > lastIndex) {
-            val text = content.substring(lastIndex, match.range.first)
-            if (text.isNotBlank()) {
-                segments.add(MarkdownSegment.Text(text))
+    while (i < lines.size) {
+        val line = lines[i]
+
+        when {
+            // Code block start
+            line.trimStart().startsWith("```") -> {
+                val language = line.trimStart().removePrefix("```").trim().ifBlank { null }
+                val codeLines = mutableListOf<String>()
+                i++
+                while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
+                    codeLines.add(lines[i])
+                    i++
+                }
+                i++ // skip closing ```
+                if (codeLines.isNotEmpty()) {
+                    segments.add(MarkdownSegment.CodeBlock(codeLines.joinToString("\n").trimEnd(), language))
+                }
             }
-        }
-        // Code block
-        val language = match.groupValues[1].ifBlank { null }
-        val code = match.groupValues[2].trimEnd()
-        segments.add(MarkdownSegment.CodeBlock(code, language))
-        lastIndex = match.range.last + 1
-    }
-
-    // Remaining text
-    if (lastIndex < content.length) {
-        val text = content.substring(lastIndex)
-        if (text.isNotBlank()) {
-            segments.add(MarkdownSegment.Text(text))
+            // Table detection: line contains '|' and has at least 2 columns
+            isTableRow(line) -> {
+                val tableLines = mutableListOf<String>()
+                while (i < lines.size && isTableRow(lines[i])) {
+                    tableLines.add(lines[i])
+                    i++
+                }
+                val table = parseTable(tableLines)
+                if (table != null) {
+                    segments.add(table)
+                } else {
+                    // Fallback: treat as plain text
+                    segments.add(MarkdownSegment.Text(tableLines.joinToString("\n")))
+                }
+            }
+            else -> {
+                // Collect plain text until next code block or table
+                val textLines = mutableListOf<String>()
+                while (i < lines.size &&
+                    !lines[i].trimStart().startsWith("```") &&
+                    !isTableRow(lines[i])
+                ) {
+                    textLines.add(lines[i])
+                    i++
+                }
+                val text = textLines.joinToString("\n")
+                if (text.isNotBlank()) {
+                    segments.add(MarkdownSegment.Text(text))
+                }
+            }
         }
     }
 
     return segments
+}
+
+private fun isTableRow(line: String): Boolean {
+    val trimmed = line.trim()
+    return trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.count { it == '|' } >= 3
+}
+
+private fun parseTable(lines: List<String>): MarkdownSegment.Table? {
+    if (lines.isEmpty()) return null
+
+    // Filter out separator lines like |---|---|
+    val dataLines = lines.filter { !it.matches(Regex("^\\|[\\s\\-:]+\\|[\\s\\-:|]+$")) }
+    if (dataLines.isEmpty()) return null
+
+    val rows = dataLines.map { line ->
+        line.trim().removeSurrounding("|").split("|").map { it.trim() }
+    }
+
+    val header = rows.first()
+    val body = rows.drop(1)
+    return MarkdownSegment.Table(header, body)
+}
+
+@Composable
+fun TableWidget(table: MarkdownSegment.Table) {
+    val borderColor = MaterialTheme.colorScheme.outlineVariant
+    val headerBg = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+
+    Column(
+        modifier = Modifier
+            .horizontalScroll(rememberScrollState())
+            .padding(vertical = 4.dp)
+            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+            .clip(RoundedCornerShape(8.dp))
+    ) {
+        // Header row
+        Row(
+            modifier = Modifier.background(headerBg)
+        ) {
+            table.header.forEach { cell ->
+                Text(
+                    text = cell,
+                    modifier = Modifier
+                        .widthIn(min = 60.dp)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            }
+        }
+        // Data rows
+        table.rows.forEach { row ->
+            Row {
+                row.forEachIndexed { idx, cell ->
+                    Text(
+                        text = cell,
+                        modifier = Modifier
+                            .widthIn(min = 60.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+            if (table.rows.last() != table.rows.last()) {
+                HorizontalDivider(color = borderColor.copy(alpha = 0.3f))
+            }
+        }
+    }
 }
 
 @Composable
@@ -161,7 +265,6 @@ fun parseRichText(text: String): AnnotatedString {
         val lines = text.split("\n")
         lines.forEachIndexed { index, line ->
             when {
-                // Headers
                 line.startsWith("### ") -> {
                     withStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 14.sp)) {
                         append(line.removePrefix("### "))
@@ -177,7 +280,6 @@ fun parseRichText(text: String): AnnotatedString {
                         append(line.removePrefix("# "))
                     }
                 }
-                // List items
                 line.startsWith("- ") || line.startsWith("* ") -> {
                     append("  • ")
                     appendFormattedText(line.removePrefix("- ").removePrefix("* "))
@@ -186,7 +288,6 @@ fun parseRichText(text: String): AnnotatedString {
                     append("  ")
                     appendFormattedText(line)
                 }
-                // Horizontal rule
                 line.matches(Regex("^---+$")) -> {
                     withStyle(SpanStyle(color = androidx.compose.ui.graphics.Color.Gray)) {
                         append("────────────────────────────")
@@ -204,31 +305,26 @@ fun parseRichText(text: String): AnnotatedString {
 }
 
 private fun androidx.compose.ui.text.AnnotatedString.Builder.appendFormattedText(text: String) {
-    // Handle bold (**text**) and italic (*text*) and inline code (`text`)
     val regex = Regex("\\*\\*(.+?)\\*\\*|\\*(.+?)\\*|`(.+?)`")
     var lastEnd = 0
 
     for (match in regex.findAll(text)) {
-        // Text before match
         if (match.range.first > lastEnd) {
             append(text.substring(lastEnd, match.range.first))
         }
 
         when {
             match.groupValues[1].isNotEmpty() -> {
-                // Bold
                 withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
                     append(match.groupValues[1])
                 }
             }
             match.groupValues[2].isNotEmpty() -> {
-                // Italic
                 withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
                     append(match.groupValues[2])
                 }
             }
             match.groupValues[3].isNotEmpty() -> {
-                // Inline code
                 withStyle(
                     SpanStyle(
                         fontFamily = FontFamily.Monospace,
@@ -243,7 +339,6 @@ private fun androidx.compose.ui.text.AnnotatedString.Builder.appendFormattedText
         lastEnd = match.range.last + 1
     }
 
-    // Remaining text
     if (lastEnd < text.length) {
         append(text.substring(lastEnd))
     }

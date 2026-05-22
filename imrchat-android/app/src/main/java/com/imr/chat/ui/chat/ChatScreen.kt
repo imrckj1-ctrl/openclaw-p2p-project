@@ -10,13 +10,15 @@ import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.aspectRatio
 import coil.compose.AsyncImage
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
@@ -25,7 +27,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.imr.chat.data.db.MessageEntity
@@ -172,11 +176,14 @@ fun ChatScreen(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun MessageBubble(message: MessageEntity) {
     val isUser = message.isFromUser
     val timeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
     val time = remember(message.createdAt) { timeFormat.format(Date(message.createdAt)) }
+    val clipboardManager = LocalClipboardManager.current
+    var showCopyMenu by remember { mutableStateOf(false) }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -191,99 +198,118 @@ fun MessageBubble(message: MessageEntity) {
         )
 
         // Bubble content varies by type
-        when (message.type) {
-            "system" -> {
-                // System message centered
-                Text(
-                    text = message.content ?: "",
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
-            }
-            "image" -> {
-                // Image message
-                Card(
-                    modifier = Modifier.widthIn(max = 280.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isUser) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Column(modifier = Modifier.padding(8.dp)) {
-                        if (message.mediaUrl != null) {
-                            AsyncImage(
-                                model = message.mediaUrl,
-                                contentDescription = message.fileName ?: "图片",
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp)),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                            )
-                        } else {
-                            Icon(
-                                Icons.Default.Image,
-                                contentDescription = null,
-                                modifier = Modifier.size(48.dp),
-                                tint = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        if (message.fileName != null) {
-                            Text(
-                                text = message.fileName,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(top = 4.dp)
-                            )
-                        }
+        Box {
+            when (message.type) {
+                "system" -> {
+                    SelectionContainer {
+                        Text(
+                            text = message.content ?: "",
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
                     }
                 }
-            }
-            "file" -> {
-                // File message
-                Card(
-                    modifier = Modifier.widthIn(max = 240.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = if (isUser) MaterialTheme.colorScheme.primaryContainer
-                        else MaterialTheme.colorScheme.surfaceVariant
-                    )
-                ) {
-                    Row(
-                        modifier = Modifier.padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            Icons.Default.Description,
-                            contentDescription = null,
-                            modifier = Modifier.size(36.dp),
-                            tint = MaterialTheme.colorScheme.primary
+                "image" -> {
+                    Card(
+                        modifier = Modifier
+                            .widthIn(max = 280.dp)
+                            .combinedClickable(
+                                onClick = { },
+                                onLongClick = {
+                                    showCopyMenu = true
+                                }
+                            ),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isUser) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant
                         )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            Text(
-                                text = message.fileName ?: "文件",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            if (message.fileSize != null) {
+                    ) {
+                        Column(modifier = Modifier.padding(8.dp)) {
+                            if (message.mediaUrl != null) {
+                                AsyncImage(
+                                    model = message.mediaUrl,
+                                    contentDescription = message.fileName ?: "图片",
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp)),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                )
+                            } else {
+                                Icon(
+                                    Icons.Default.Image,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(48.dp),
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            if (message.fileName != null) {
                                 Text(
-                                    text = formatFileSize(message.fileSize),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    text = message.fileName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(top = 4.dp)
                                 )
                             }
                         }
                     }
                 }
-            }
-            "reply" -> {
-                // AI reply card with Markdown rendering
-                Column {
+                "file" -> {
                     Card(
-                        modifier = Modifier.widthIn(max = 320.dp),
+                        modifier = Modifier
+                            .widthIn(max = 240.dp)
+                            .combinedClickable(
+                                onClick = { },
+                                onLongClick = {
+                                    showCopyMenu = true
+                                }
+                            ),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isUser) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(12.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Description,
+                                contentDescription = null,
+                                modifier = Modifier.size(36.dp),
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = message.fileName ?: "文件",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                if (message.fileSize != null) {
+                                    Text(
+                                        text = formatFileSize(message.fileSize),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                "reply" -> {
+                    Card(
+                        modifier = Modifier
+                            .widthIn(max = 320.dp)
+                            .combinedClickable(
+                                onClick = { },
+                                onLongClick = {
+                                    showCopyMenu = true
+                                }
+                            ),
                         shape = RoundedCornerShape(
                             topStart = 4.dp,
                             topEnd = 12.dp,
@@ -299,7 +325,6 @@ fun MessageBubble(message: MessageEntity) {
                                 content = message.content ?: "",
                                 isDarkTheme = false
                             )
-                            // Footer: timing + char count
                             if (message.elapsedMs != null || message.charCount != null) {
                                 Spacer(modifier = Modifier.height(6.dp))
                                 Row(
@@ -320,33 +345,57 @@ fun MessageBubble(message: MessageEntity) {
                         }
                     }
                 }
-            }
-            else -> {
-                // Default text bubble
-                Box(
-                    modifier = Modifier
-                        .widthIn(max = 280.dp)
-                        .clip(
-                            RoundedCornerShape(
-                                topStart = 12.dp,
-                                topEnd = 12.dp,
-                                bottomStart = if (isUser) 12.dp else 4.dp,
-                                bottomEnd = if (isUser) 4.dp else 12.dp
+                else -> {
+                    // Default text bubble
+                    Box(
+                        modifier = Modifier
+                            .widthIn(max = 280.dp)
+                            .clip(
+                                RoundedCornerShape(
+                                    topStart = 12.dp,
+                                    topEnd = 12.dp,
+                                    bottomStart = if (isUser) 12.dp else 4.dp,
+                                    bottomEnd = if (isUser) 4.dp else 12.dp
+                                )
                             )
-                        )
-                        .background(
-                            if (isUser) MaterialTheme.colorScheme.primary
-                            else MaterialTheme.colorScheme.surfaceVariant
-                        )
-                        .padding(10.dp)
-                ) {
-                    Text(
-                        text = message.content ?: "",
-                        color = if (isUser) MaterialTheme.colorScheme.onPrimary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                            .background(
+                                if (isUser) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.surfaceVariant
+                            )
+                            .combinedClickable(
+                                onClick = { },
+                                onLongClick = {
+                                    showCopyMenu = true
+                                }
+                            )
+                            .padding(10.dp)
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                text = message.content ?: "",
+                                color = if (isUser) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
                 }
+            }
+
+            // Copy dropdown menu
+            DropdownMenu(
+                expanded = showCopyMenu,
+                onDismissRequest = { showCopyMenu = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text("复制") },
+                    onClick = {
+                        val textToCopy = message.content ?: message.fileName ?: ""
+                        clipboardManager.setText(AnnotatedString(textToCopy))
+                        showCopyMenu = false
+                    },
+                    leadingIcon = { Icon(Icons.Default.ContentCopy, null) }
+                )
             }
         }
     }
