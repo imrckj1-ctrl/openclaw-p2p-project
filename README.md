@@ -10,96 +10,135 @@
 
 ### Overview
 
-OpenClaw P2P Chat is a lightweight real-time chat system built on the [OpenClaw](https://github.com/anthropics/openclaw) gateway platform. It consists of two components:
+OpenClaw P2P Chat is a lightweight real-time AI chat system built on the [OpenClaw](https://github.com/anthropics/openclaw) gateway platform. It enables you to chat with AI models from your Android phone through a self-hosted WebSocket bridge.
 
-- **openclaw-p2p** — A WebSocket plugin for the OpenClaw gateway that bridges AI model responses to connected clients over a persistent WebSocket connection, with built-in HTTP media server for file/image delivery.
-- **imrchat-android** — A native Android chat application built with Jetpack Compose, providing a clean mobile interface for interacting with AI models through the P2P plugin.
+| Component | Description |
+|-----------|-------------|
+| **openclaw-p2p** | WebSocket plugin for OpenClaw gateway. Bridges AI model responses to clients over persistent WebSocket connections, with built-in HTTP media server. |
+| **imrchat-android** | Native Android chat app built with Jetpack Compose + Material 3. Connects to the P2P plugin for a WeChat-like AI chat experience. |
 
 ### Download
 
-[Download Latest APK (v0.1.3)](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.3/IMRChat-v0.1.3-debug.apk)
+| Version | Download | Release Date |
+|---------|----------|-------------|
+| **v0.1.3** (latest) | [IMRChat-v0.1.3-debug.apk](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.3/IMRChat-v0.1.3-debug.apk) | 2026-05-22 |
 
-Or clone and build from source (see Installation section below).
+Or build from source: `cd imrchat-android && ./gradlew assembleDebug`
 
 ### Features
 
-**P2P Plugin (Server)**
-- WebSocket server with token-based authentication
-- Real-time streaming of AI responses with optimized chunk delivery (80-char chunks, 8ms interval)
-- Thinking/reasoning content parsing and streaming (`<think>` tag support)
-- HTTP media server for serving images and files over the internet
-- Offline message caching (configurable limit)
-- File and image upload support (up to 50MB files, 10MB images)
-- 64KB chunked file transfer
+#### P2P Plugin (Server)
 
-**Android App (Client)**
-- Material 3 design with Jetpack Compose
-- Real-time message streaming with live typing indicators
-- Collapsible thinking/reasoning content display
-- Image and file sending/receiving with Coil image loading
-- Markdown rendering in messages
-- Local SQLite storage via Room
-- Configurable server connection settings
+| Category | Feature |
+|----------|---------|
+| **Connection** | WebSocket server on configurable port (default 18790), token-based authentication, heartbeat keep-alive |
+| **Streaming** | Real-time AI response streaming with optimized chunk delivery (pre-serialized JSON, 8ms interval) |
+| **Thinking** | `<think>` tag parsing and streaming — AI reasoning content sent as separate `thinking_chunk` events |
+| **Media** | Built-in HTTP media server for serving uploaded images/files; supports PNG/GIF/WebP/JPEG |
+| **File Transfer** | 64KB chunked upload for large files (max 50MB per file, 10MB per image) |
+| **Offline** | Message caching for disconnected clients with configurable limit (default 100) |
+| **Security** | Token masked in logs, targeted message routing by client ID |
+| **Recovery** | Lazy channelRuntime recovery, graceful WebSocket close, media buffer TTL cleanup (5min) |
+
+#### Android App (Client)
+
+| Category | Feature |
+|----------|---------|
+| **Chat** | Real-time streaming replies, markdown rendering (headers, bold, italic, code blocks, tables) |
+| **Tables** | Markdown pipe tables with horizontal scroll support |
+| **Thinking** | Collapsible thinking/reasoning display |
+| **Media** | Image/file sending via content picker; received images loaded with Coil |
+| **Copy** | Long-press any message bubble to copy; text selection on all message types |
+| **Storage** | Room SQLite local storage with proper database migrations |
+| **Offline** | Outgoing message queue — messages queued when disconnected, auto-flushed on reconnect |
+| **Voice** | Voice input via Android SpeechRecognizer (Chinese) |
+| **Commands** | Slash-command support with autocomplete suggestions |
+| **Settings** | Multiple server configs, dark mode toggle, clear chat history |
+| **Connectivity** | Coroutine-based reconnection with exponential backoff (3s → 5s → 10s → 30s) |
 
 ### Architecture
 
 ```
-┌─────────────────┐    WebSocket     ┌──────────────────┐    OpenClaw API    ┌──────────────┐
-│  Android App    │◄────────────────►│  P2P Plugin      │◄──────────────────►│  AI Models   │
-│  (imrchat)      │    port 18790    │  (openclaw-p2p)  │                    │  (LLM APIs)  │
-└─────────────────┘                  └──────────────────┘                    └──────────────┘
-                                         │
-                                         │ HTTP (media)
-                                         ▼
-                                    ┌──────────────┐
-                                    │  Media Files  │
-                                    │  ~/.openclaw/ │
-                                    │  p2p-media/   │
-                                    └──────────────┘
+┌──────────────────┐                    ┌───────────────────┐
+│  Android App     │    WebSocket       │  OpenClaw Gateway │
+│  (Jetpack        │◄══════════════════►│  (port 18789)     │
+│   Compose)       │    port 18790       │       │           │
+└──────────────────┘                    │  ┌────┴────────┐  │
+        │                               │  │ P2P Plugin  │  │
+        │ HTTP (media)                  │  │ (port 18790) │  │
+        ▼                               │  └────┬────────┘  │
+┌──────────────────┐                    │       │           │
+│  Media Files     │                    │  OpenClaw API     │
+│  ~/.openclaw/    │                    │       │           │
+│  p2p-media/      │                    └───────┼───────────┘
+└──────────────────┘                            │
+                                                ▼
+                                       ┌────────────────┐
+                                       │   AI Models    │
+                                       │  (LLM APIs)    │
+                                       └────────────────┘
 ```
 
 ### Directory Structure
 
 ```
 openclaw-p2p-project/
-├── openclaw-p2p/                  # OpenClaw WebSocket plugin
-│   ├── index.js                   # Plugin entry point
-│   ├── package.json               # Node.js dependencies
-│   └── openclaw.plugin.json       # Plugin manifest
-├── imrchat-android/               # Android application
-│   ├── app/
-│   │   ├── build.gradle.kts       # App-level build config
-│   │   └── src/main/java/com/imr/chat/
-│   │       ├── network/           # WebSocket client & protocol
-│   │       ├── ui/                # Compose UI screens
-│   │       ├── data/              # Database & settings
-│   │       └── service/           # Background service
-│   ├── build.gradle.kts           # Project-level build config
-│   └── settings.gradle.kts        # Gradle settings
-├── 开发任务.md                     # Development task tracking
-└── 设计方案与待确认问题.md           # Design decisions & open questions
+├── openclaw-p2p/                     # OpenClaw WebSocket plugin
+│   ├── index.js                      #   Plugin entry — WebSocket server, message routing, protocol
+│   ├── openclaw.plugin.json          #   Plugin manifest & config schema
+│   ├── package.json                  #   Node.js dependencies (ws)
+│   └── src/                          #   Plugin source modules
+├── imrchat-android/                  # Android app
+│   ├── app/src/main/java/com/imr/chat/
+│   │   ├── network/
+│   │   │   ├── WebSocketClient.kt    #   OkHttp WebSocket with auto-reconnect & offline queue
+│   │   │   ├── MediaSender.kt       #   Image/file upload with chunking & format preservation
+│   │   │   └── protocol/
+│   │   │       └── Messages.kt       #   Full message protocol (25+ message types)
+│   │   ├── ui/
+│   │   │   ├── chat/
+│   │   │   │   ├── ChatScreen.kt     #   Main chat UI with streaming cards
+│   │   │   │   └── ChatViewModel.kt  #   State management & offline queue
+│   │   │   ├── settings/
+│   │   │   │   ├── SettingsScreen.kt #   Server config, dark mode, clear history
+│   │   │   │   └── SettingsViewModel.kt
+│   │   │   └── components/
+│   │   │       └── MarkdownRenderer.kt  # Rich markdown: tables, code blocks, bold/italic
+│   │   ├── data/
+│   │   │   ├── db/
+│   │   │   │   ├── Entities.kt       #   Room entities (MessageEntity, CommandEntity)
+│   │   │   │   ├── Daos.kt           #   Room DAOs with Flow support
+│   │   │   │   └── AppDatabase.kt    #   Room database with version migrations
+│   │   │   └── SettingsStore.kt      #   DataStore-based settings persistence
+│   │   ├── service/
+│   │   │   └── ChatService.kt        #   Foreground service for persistent connection
+│   │   └── IMRChatApp.kt             #   Application class
+│   ├── app/build.gradle.kts
+│   ├── build.gradle.kts
+│   └── settings.gradle.kts
+├── IMRChat-v0.1.3-debug.apk          # Latest prebuilt APK
+└── README.md
 ```
 
 ### Prerequisites
 
-- [OpenClaw Gateway](https://github.com/anthropics/openclaw) v2026.5.12+
-- Node.js 18+
-- Android Studio (for building the Android app)
-- JDK 17
+| Requirement | Version |
+|-------------|---------|
+| OpenClaw Gateway | v2026.5.12+ |
+| Node.js | 18+ |
+| JDK | 17 |
+| Android SDK | API 35 |
 
 ### Installation
 
-#### 1. Plugin Setup
+#### 1. Install the Plugin
 
 ```bash
-# Copy plugin to OpenClaw extensions directory
 cp -r openclaw-p2p ~/.openclaw/extensions/openclaw-p2p
-
-# Install dependencies
 cd ~/.openclaw/extensions/openclaw-p2p && npm install
 ```
 
-#### 2. Gateway Configuration
+#### 2. Configure the Gateway
 
 Add to `~/.openclaw/openclaw.json`:
 
@@ -125,45 +164,101 @@ Add to `~/.openclaw/openclaw.json`:
 }
 ```
 
-#### 3. Android App
+Then restart the gateway. Check `openclaw logs` or the gateway control UI to confirm the plugin is running and listening.
 
-Open `imrchat-android/` in Android Studio, build and run on your device.
+#### 3. Install the Android App
 
-In the app settings, configure:
-- **Server URL**: `ws://your-server-ip:18790`
-- **Token**: The same token configured in the gateway
+- **Prebuilt APK**: Download from [Releases](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases) and install directly.
+- **Build from source**: Open `imrchat-android/` in Android Studio, sync Gradle, build & run.
 
-### Plugin Configuration
+In the app, go to **Settings** and add a server:
 
-| Parameter           | Type   | Default     | Description                        |
-|---------------------|--------|-------------|------------------------------------|
-| `port`              | number | 18790       | WebSocket server port              |
-| `token`             | string | —           | Authentication token               |
-| `maxImageSize`      | number | 10485760    | Max image size in bytes (10MB)     |
-| `maxFileSize`       | number | 52428800    | Max file size in bytes (50MB)      |
-| `chunkSize`         | number | 65536       | File transfer chunk size (64KB)    |
-| `offlineCacheLimit` | number | 100         | Max cached offline messages        |
+| Field | Value |
+|-------|-------|
+| Host | Your server's LAN IP (e.g. `192.168.x.x`) |
+| Port | `18790` |
+| Token | Same token from gateway config |
+| SSL | Off (unless you set up WSS) |
 
-### Protocol
+### Plugin Configuration Reference
 
-The plugin communicates over WebSocket using JSON messages:
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `port` | number | `18790` | WebSocket server port |
+| `token` | string | `""` | Auth token (empty = no auth) |
+| `maxImageSize` | number | `10485760` | Max image bytes (10 MB) |
+| `maxFileSize` | number | `52428800` | Max file bytes (50 MB) |
+| `chunkSize` | number | `65536` | File transfer chunk size (64 KB) |
+| `offlineCacheLimit` | number | `100` | Max cached offline messages per client |
 
-```json
-// Client → Server: Send message
-{"type": "send", "content": "Hello!", "msgId": "uuid"}
+### WebSocket Protocol
 
-// Server → Client: Streaming reply
-{"type": "reply_start", "msgId": "uuid", "replyTo": "original-uuid", "model": "model-name"}
-{"type": "reply_chunk", "msgId": "uuid", "content": "partial text"}
-{"type": "reply_end", "msgId": "uuid", "fullContent": "complete response"}
+All messages are JSON with a `type` field. The connection lifecycle:
 
-// Server → Client: Thinking/reasoning content
-{"type": "thinking_start", "msgId": "uuid", "replyTo": "original-uuid"}
-{"type": "thinking_chunk", "msgId": "uuid", "content": "thinking text"}
-{"type": "thinking_end", "msgId": "uuid", "fullContent": "full thinking"}
+```
+Client ──auth──► Server
+Client ◄──auth_result── Server
+Client ──text──► Server      (or image, file)
+Client ◄──reply_start── Server
+Client ◄──reply_chunk── Server  (streaming, repeated)
+Client ◄──reply_end── Server
+```
 
-// Client → Server: Upload media
-{"type": "upload_media", "filename": "photo.jpg", "mimeType": "image/jpeg", "size": 123456, "data": "base64..."}
+#### Client → Server
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `auth` | `token`, `clientId` | Authenticate with persistent device ID |
+| `text` | `msgId`, `content`, `timestamp`, `source?` | Send text message |
+| `image` | `msgId`, `fileName`, `mimeType`, `data`, `timestamp` | Send image (base64, small) |
+| `image_start` | `msgId`, `fileName`, `mimeType`, `totalSize`, `totalChunks` | Start chunked image transfer |
+| `image_chunk` | `msgId`, `chunkIndex`, `data` | Image chunk |
+| `image_end` | `msgId` | End image transfer |
+| `file` | `msgId`, `fileName`, `mimeType`, `fileSize`, `data`, `timestamp` | Send file (base64, small) |
+| `file_start` | `msgId`, `fileName`, `mimeType`, `totalSize`, `totalChunks` | Start chunked file transfer |
+| `file_chunk` | `msgId`, `chunkIndex`, `data` | File chunk |
+| `file_end` | `msgId` | End file transfer |
+| `get_commands` | — | Request available slash commands |
+| `typing` | `clientId`, `typing` | Typing indicator |
+
+#### Server → Client
+
+| Type | Fields | Description |
+|------|--------|-------------|
+| `auth_result` | `ok`, `serverVersion`, `reason?` | Auth success/failure |
+| `reply_start` | `msgId`, `replyTo`, `model?`, `startedAt?` | AI reply starting |
+| `reply_chunk` | `msgId`, `content` | Reply text chunk (streaming) |
+| `reply_end` | `msgId`, `fullContent`, `elapsedMs?`, `model?`, `charCount?` | Reply complete |
+| `thinking_start` | `msgId`, `replyTo` | AI reasoning starting |
+| `thinking_chunk` | `msgId`, `content` | Reasoning text chunk |
+| `thinking_end` | `msgId`, `fullContent` | Reasoning complete |
+| `media` | `msgId`, `replyTo?`, `url`, `text?` | AI-generated image/file |
+| `commands` | `commands[]` (`name`, `description`, `hint`) | Available commands |
+| `system` | `msgId`, `content`, `level`, `timestamp?` | System notification |
+| `error` | `msgId`, `code`, `message`, `timestamp?` | Error message |
+| `offline_messages` | `count` | Offline messages being delivered |
+| `offline_done` | — | All offline messages delivered |
+| `typing` | `clientId`, `typing` | Peer typing indicator |
+
+### Troubleshooting
+
+| Problem | Check |
+|---------|-------|
+| App won't connect | Verify server IP & port are reachable from phone (same LAN) |
+| Auth fails | Token in app must match gateway `channels.p2p.token` AND `plugins.entries.openclaw-p2p.config.token` |
+| Plugin not running | `openclaw logs` — check for "P2P plugin started" and port binding errors |
+| Images not loading | Ensure media server is reachable. Check `~/.openclaw/p2p-media/` for saved files |
+| Slow responses | First message after cold start includes model warmup (5-8s). Subsequent replies should be fast. |
+
+### Development
+
+```bash
+# Plugin: edit then restart gateway
+vim ~/.openclaw/extensions/openclaw-p2p/index.js
+openclaw restart
+
+# Android: edit then rebuild
+cd imrchat-android && ./gradlew assembleDebug
 ```
 
 ### License
@@ -178,96 +273,134 @@ MIT
 
 ### 概述
 
-OpenClaw P2P Chat 是一个基于 [OpenClaw](https://github.com/anthropics/openclaw) 网关平台构建的轻量级实时聊天系统。由两个组件组成：
+OpenClaw P2P Chat 是一个基于 [OpenClaw](https://github.com/anthropics/openclaw) 网关平台的轻量级实时 AI 聊天系统。通过自建的 WebSocket 桥梁，在 Android 手机上即可与 AI 模型对话。
 
-- **openclaw-p2p** — OpenClaw 网关的 WebSocket 插件，通过持久 WebSocket 连接将 AI 模型响应桥接到已连接的客户端，内置 HTTP 媒体服务器用于文件/图片传输。
-- **imrchat-android** — 使用 Jetpack Compose 构建的原生 Android 聊天应用，提供简洁的移动端界面，通过 P2P 插件与 AI 模型交互。
+| 组件 | 说明 |
+|------|------|
+| **openclaw-p2p** | OpenClaw 网关的 WebSocket 插件。通过持久 WebSocket 连接桥接 AI 响应到客户端，内置 HTTP 媒体服务器。 |
+| **imrchat-android** | Jetpack Compose + Material 3 构建的原生 Android 聊天应用，连接 P2P 插件，体验类似微信的 AI 聊天。 |
 
 ### 下载
 
-[下载最新 APK (v0.1.3)](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.3/IMRChat-v0.1.3-debug.apk)
+| 版本 | 下载 | 发布日期 |
+|------|------|----------|
+| **v0.1.3**（最新） | [IMRChat-v0.1.3-debug.apk](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.3/IMRChat-v0.1.3-debug.apk) | 2026-05-22 |
 
-或克隆源码自行构建（参见下方安装部署部分）。
+或从源码构建：`cd imrchat-android && ./gradlew assembleDebug`
 
 ### 功能特性
 
-**P2P 插件（服务端）**
-- WebSocket 服务器，支持 Token 认证
-- AI 响应实时流式传输，优化分块投递（80字符/块，8毫秒间隔）
-- 思考/推理内容解析与流式传输（支持 `<think>` 标签）
-- HTTP 媒体服务器，支持外网图片和文件访问
-- 离线消息缓存（可配置上限）
-- 文件和图片上传（文件最大 50MB，图片最大 10MB）
-- 64KB 分片文件传输
+#### P2P 插件（服务端）
 
-**Android 应用（客户端）**
-- Material 3 设计，Jetpack Compose 构建
-- 实时消息流式传输，实时打字指示器
-- 可折叠的思考/推理内容展示
-- 图片和文件收发，Coil 图片加载
-- 消息内 Markdown 渲染
-- Room 本地 SQLite 存储
-- 可配置的服务器连接设置
+| 类别 | 功能 |
+|------|------|
+| **连接** | WebSocket 服务器（可配置端口，默认 18790），Token 认证，心跳保活 |
+| **流式传输** | AI 回复实时流式推送，预序列化 JSON 优化性能 |
+| **思考过程** | `<think>` 标签解析，AI 推理过程以独立 `thinking_chunk` 事件流式发送 |
+| **媒体** | 内置 HTTP 媒体服务器，支持 PNG/GIF/WebP/JPEG 图片和文件外网访问 |
+| **文件传输** | 64KB 分片上传（文件最大 50MB，图片最大 10MB） |
+| **离线消息** | 断线消息缓存，重连后自动投递（默认 100 条上限） |
+| **安全** | 日志 Token 脱敏、按 clientId 定向路由 |
+| **容错** | channelRuntime 懒恢复、WebSocket 优雅关闭、媒体缓冲区 5 分钟 TTL 自动清理 |
+
+#### Android 应用（客户端）
+
+| 类别 | 功能 |
+|------|------|
+| **聊天** | 实时流式回复、Markdown 渲染（标题、粗体、斜体、代码块、表格） |
+| **表格** | Markdown 管道表格支持横向滑动 |
+| **思考** | 可折叠的 AI 思考过程展示 |
+| **媒体** | 图片/文件发送，收到的图片用 Coil 加载 |
+| **复制** | 长按任意消息气泡弹出复制菜单，所有文字消息支持选中复制 |
+| **存储** | Room SQLite 本地存储，带数据库版本迁移 |
+| **离线** | 消息发送队列——断线时自动暂存，重连后自动发送 |
+| **语音** | 语音输入（调用 Android SpeechRecognizer，中文） |
+| **命令** | 斜杠命令 `/` 自动补全提示 |
+| **设置** | 多服务器配置、深色模式、清除聊天记录 |
 
 ### 架构
 
 ```
-┌─────────────────┐    WebSocket     ┌──────────────────┐    OpenClaw API    ┌──────────────┐
-│  Android 应用   │◄────────────────►│  P2P 插件        │◄──────────────────►│  AI 模型     │
-│  (imrchat)      │    端口 18790    │  (openclaw-p2p)  │                    │  (大模型API) │
-└─────────────────┘                  └──────────────────┘                    └──────────────┘
-                                         │
-                                         │ HTTP（媒体服务）
-                                         ▼
-                                    ┌──────────────┐
-                                    │  媒体文件     │
-                                    │  ~/.openclaw/ │
-                                    │  p2p-media/   │
-                                    └──────────────┘
+┌──────────────────┐                    ┌───────────────────┐
+│  Android 应用    │    WebSocket       │  OpenClaw 网关    │
+│  (Jetpack        │◄══════════════════►│  (端口 18789)     │
+│   Compose)       │     端口 18790     │       │           │
+└──────────────────┘                    │  ┌────┴────────┐  │
+        │                               │  │ P2P 插件    │  │
+        │ HTTP（获取媒体文件）              │  │ (端口 18790)│  │
+        ▼                               │  └────┬────────┘  │
+┌──────────────────┐                    │       │           │
+│  媒体文件         │                    │  OpenClaw API     │
+│  ~/.openclaw/    │                    │       │           │
+│  p2p-media/      │                    └───────┼───────────┘
+└──────────────────┘                            │
+                                                ▼
+                                       ┌────────────────┐
+                                       │   AI 大模型     │
+                                       │  (LLM APIs)    │
+                                       └────────────────┘
 ```
 
 ### 目录结构
 
 ```
 openclaw-p2p-project/
-├── openclaw-p2p/                  # OpenClaw WebSocket 插件
-│   ├── index.js                   # 插件入口
-│   ├── package.json               # Node.js 依赖
-│   └── openclaw.plugin.json       # 插件清单
-├── imrchat-android/               # Android 应用
-│   ├── app/
-│   │   ├── build.gradle.kts       # 应用构建配置
-│   │   └── src/main/java/com/imr/chat/
-│   │       ├── network/           # WebSocket 客户端与协议
-│   │       ├── ui/                # Compose UI 界面
-│   │       ├── data/              # 数据库与设置
-│   │       └── service/           # 后台服务
-│   ├── build.gradle.kts           # 项目构建配置
-│   └── settings.gradle.kts        # Gradle 设置
-├── 开发任务.md                     # 开发任务追踪
-└── 设计方案与待确认问题.md           # 设计方案与待确认问题
+├── openclaw-p2p/                     # OpenClaw WebSocket 插件
+│   ├── index.js                      #   插件入口 — WebSocket 服务器、消息路由、协议处理
+│   ├── openclaw.plugin.json          #   插件清单与配置定义
+│   ├── package.json                  #   Node.js 依赖
+│   └── src/                          #   插件模块
+├── imrchat-android/                  # Android 应用
+│   ├── app/src/main/java/com/imr/chat/
+│   │   ├── network/
+│   │   │   ├── WebSocketClient.kt    #   OkHttp WebSocket + 自动重连 + 离线队列
+│   │   │   ├── MediaSender.kt       #   图片/文件上传（分片 + 保留原格式）
+│   │   │   └── protocol/
+│   │   │       └── Messages.kt       #   完整消息协议（25+ 消息类型）
+│   │   ├── ui/
+│   │   │   ├── chat/
+│   │   │   │   ├── ChatScreen.kt     #   聊天主界面 + 流式卡片
+│   │   │   │   └── ChatViewModel.kt  #   状态管理 + 离线队列
+│   │   │   ├── settings/
+│   │   │   │   ├── SettingsScreen.kt #   服务器配置、深色模式、清除记录
+│   │   │   │   └── SettingsViewModel.kt
+│   │   │   └── components/
+│   │   │       └── MarkdownRenderer.kt  # 富文本：表格、代码块、粗/斜体
+│   │   ├── data/
+│   │   │   ├── db/
+│   │   │   │   ├── Entities.kt       #   Room 数据实体
+│   │   │   │   ├── Daos.kt           #   Room DAO（Flow 响应式查询）
+│   │   │   │   └── AppDatabase.kt    #   Room 数据库（含版本迁移）
+│   │   │   └── SettingsStore.kt      #   DataStore 持久化配置
+│   │   ├── service/
+│   │   │   └── ChatService.kt        #   前台服务（保持连接常驻）
+│   │   └── IMRChatApp.kt             #   Application 初始化
+│   ├── app/build.gradle.kts
+│   ├── build.gradle.kts
+│   └── settings.gradle.kts
+├── IMRChat-v0.1.3-debug.apk          # 最新预编译安装包
+└── README.md
 ```
 
 ### 环境要求
 
-- [OpenClaw Gateway](https://github.com/anthropics/openclaw) v2026.5.12+
-- Node.js 18+
-- Android Studio（构建 Android 应用）
-- JDK 17
+| 软件 | 版本 |
+|------|------|
+| OpenClaw Gateway | v2026.5.12+ |
+| Node.js | 18+ |
+| JDK | 17 |
+| Android SDK | API 35 |
 
 ### 安装部署
 
-#### 1. 插件安装
+#### 1. 安装插件
 
 ```bash
-# 复制插件到 OpenClaw 扩展目录
 cp -r openclaw-p2p ~/.openclaw/extensions/openclaw-p2p
-
-# 安装依赖
 cd ~/.openclaw/extensions/openclaw-p2p && npm install
 ```
 
-#### 2. 网关配置
+#### 2. 配置网关
 
 在 `~/.openclaw/openclaw.json` 中添加：
 
@@ -293,45 +426,101 @@ cd ~/.openclaw/extensions/openclaw-p2p && npm install
 }
 ```
 
-#### 3. Android 应用
+重启网关。用 `openclaw logs` 或网关控制面板确认插件已启动并监听端口。
 
-在 Android Studio 中打开 `imrchat-android/`，构建并安装到设备。
+#### 3. 安装 Android 应用
 
-在应用设置中配置：
-- **服务器地址**：`ws://你的服务器IP:18790`
-- **Token**：与网关配置中相同的密钥
+- **预编译 APK**：从 [Releases](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases) 下载直接安装。
+- **源码构建**：Android Studio 打开 `imrchat-android/`，同步 Gradle，构建运行。
+
+在 APP 中进入**设置**添加服务器：
+
+| 字段 | 值 |
+|------|-----|
+| 主机 | 你服务器的局域网 IP（如 `192.168.x.x`） |
+| 端口 | `18790` |
+| Token | 与网关配置中相同的密钥 |
+| SSL | 关闭（除非配置了 WSS） |
 
 ### 插件参数
 
-| 参数                | 类型   | 默认值      | 说明                             |
-|---------------------|--------|-------------|----------------------------------|
-| `port`              | number | 18790       | WebSocket 服务器端口             |
-| `token`             | string | —           | 认证密钥                         |
-| `maxImageSize`      | number | 10485760    | 图片最大字节数（10MB）           |
-| `maxFileSize`       | number | 52428800    | 文件最大字节数（50MB）           |
-| `chunkSize`         | number | 65536       | 文件传输分片大小（64KB）         |
-| `offlineCacheLimit` | number | 100         | 离线消息缓存上限                 |
+| 参数 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `port` | number | `18790` | WebSocket 服务器端口 |
+| `token` | string | `""` | 认证密钥（空 = 无认证） |
+| `maxImageSize` | number | `10485760` | 图片最大字节数（10 MB） |
+| `maxFileSize` | number | `52428800` | 文件最大字节数（50 MB） |
+| `chunkSize` | number | `65536` | 文件传输分片大小（64 KB） |
+| `offlineCacheLimit` | number | `100` | 每客户端离线消息缓存上限 |
 
-### 通信协议
+### WebSocket 通信协议
 
-插件通过 WebSocket 使用 JSON 消息通信：
+所有消息为 JSON 格式，通过 `type` 字段区分。连接流程：
 
-```json
-// 客户端 → 服务端：发送消息
-{"type": "send", "content": "你好！", "msgId": "uuid"}
+```
+客户端 ──auth──► 服务端        认证
+客户端 ◄──auth_result── 服务端  认证结果
+客户端 ──text──► 服务端        发送消息
+客户端 ◄──reply_start── 服务端  开始回复
+客户端 ◄──reply_chunk── 服务端  流式内容（多次）
+客户端 ◄──reply_end── 服务端    回复完成
+```
 
-// 服务端 → 客户端：流式回复
-{"type": "reply_start", "msgId": "uuid", "replyTo": "原始uuid", "model": "模型名"}
-{"type": "reply_chunk", "msgId": "uuid", "content": "部分内容"}
-{"type": "reply_end", "msgId": "uuid", "fullContent": "完整回复"}
+#### 客户端 → 服务端
 
-// 服务端 → 客户端：思考/推理内容
-{"type": "thinking_start", "msgId": "uuid", "replyTo": "原始uuid"}
-{"type": "thinking_chunk", "msgId": "uuid", "content": "思考文本"}
-{"type": "thinking_end", "msgId": "uuid", "fullContent": "完整思考"}
+| 类型 | 字段 | 说明 |
+|------|------|------|
+| `auth` | `token`, `clientId` | 认证（带持久设备ID） |
+| `text` | `msgId`, `content`, `timestamp`, `source?` | 发送文字消息 |
+| `image` | `msgId`, `fileName`, `mimeType`, `data`, `timestamp` | 发送图片（base64，小文件） |
+| `image_start` | `msgId`, `fileName`, `mimeType`, `totalSize`, `totalChunks` | 开始分片图片传输 |
+| `image_chunk` | `msgId`, `chunkIndex`, `data` | 图片分片 |
+| `image_end` | `msgId` | 图片传输结束 |
+| `file` | `msgId`, `fileName`, `mimeType`, `fileSize`, `data`, `timestamp` | 发送文件（base64，小文件） |
+| `file_start` | `msgId`, `fileName`, `mimeType`, `totalSize`, `totalChunks` | 开始分片文件传输 |
+| `file_chunk` | `msgId`, `chunkIndex`, `data` | 文件分片 |
+| `file_end` | `msgId` | 文件传输结束 |
+| `get_commands` | — | 请求可用命令列表 |
+| `typing` | `clientId`, `typing` | 输入状态通知 |
 
-// 客户端 → 服务端：上传媒体
-{"type": "upload_media", "filename": "photo.jpg", "mimeType": "image/jpeg", "size": 123456, "data": "base64..."}
+#### 服务端 → 客户端
+
+| 类型 | 字段 | 说明 |
+|------|------|------|
+| `auth_result` | `ok`, `serverVersion`, `reason?` | 认证结果 |
+| `reply_start` | `msgId`, `replyTo`, `model?`, `startedAt?` | AI 开始回复 |
+| `reply_chunk` | `msgId`, `content` | 回复文字块（流式） |
+| `reply_end` | `msgId`, `fullContent`, `elapsedMs?`, `model?`, `charCount?` | 回复完成 |
+| `thinking_start` | `msgId`, `replyTo` | AI 开始推理 |
+| `thinking_chunk` | `msgId`, `content` | 推理文字块 |
+| `thinking_end` | `msgId`, `fullContent` | 推理完成 |
+| `media` | `msgId`, `replyTo?`, `url`, `text?` | AI 生成的图片/文件 |
+| `commands` | `commands[]` (`name`, `description`, `hint`) | 可用命令列表 |
+| `system` | `msgId`, `content`, `level`, `timestamp?` | 系统通知 |
+| `error` | `msgId`, `code`, `message`, `timestamp?` | 错误消息 |
+| `offline_messages` | `count` | 离线消息开始投递 |
+| `offline_done` | — | 离线消息投递完毕 |
+| `typing` | `clientId`, `typing` | 对方输入状态 |
+
+### 常见问题
+
+| 问题 | 排查 |
+|------|------|
+| 无法连接 | 确认手机和服务器在同一局域网，检查 IP 和端口是否可达 |
+| 认证失败 | APP 中 Token 需与网关 `channels.p2p.token` 和 `plugins.entries.openclaw-p2p.config.token` 一致 |
+| 插件未启动 | 执行 `openclaw logs` 查看是否有 "P2P plugin started" 和端口绑定错误 |
+| 图片加载失败 | 检查媒体服务器是否可达，查看 `~/.openclaw/p2p-media/` 是否有文件 |
+| 首次回复慢 | 冷启动首次调用包含模型预热（5-8秒），后续回复应该很快 |
+
+### 开发
+
+```bash
+# 插件：编辑后重启网关
+vim ~/.openclaw/extensions/openclaw-p2p/index.js
+openclaw restart
+
+# Android：编辑后重新构建
+cd imrchat-android && ./gradlew assembleDebug
 ```
 
 ### 开源协议
