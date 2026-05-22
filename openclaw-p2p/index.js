@@ -259,9 +259,13 @@ async function handleMessage(ws, raw, cfg) {
   client.lastActivity = Date.now();
 
   switch (msg.type) {
-    case "text":
+    case "text": {
+      const hm0 = Date.now();
       await handleTextMessage(ws, client, msg, cfg);
+      const hm1 = Date.now();
+      log("info", `⏱️ handleMessage(text) total=${hm1 - hm0}ms`);
       break;
+    }
 
     case "get_commands":
       sendJson(ws, { type: "commands", commands: getCommandList() });
@@ -313,6 +317,7 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
     return;
   }
 
+  const t0 = Date.now();
   const accountId = "default";
   const ctx = { ...buildInboundContext(ws, msg), ...ctxOverrides };
 
@@ -323,6 +328,7 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
     accountId,
     peer: { kind: "direct", id: ws._clientId },
   });
+  const t1 = Date.now();
 
   ctx.SessionKey = route.sessionKey;
 
@@ -334,12 +340,15 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
 
   // Finalize inbound context
   const finalized = channelRuntime.reply.finalizeInboundContext(ctx);
+  const t2 = Date.now();
 
   // Announce reply start IMMEDIATELY — don't wait for session recording
   sendReplyStart(ws, replyMsgId, msg.msgId, {
     model: modelName,
     startedAt: dispatchStartTime,
   });
+  const t3 = Date.now();
+  log("info", `⏱️ timing: resolveRoute=${t1 - t0}ms finalizeCtx=${t2 - t1}ms sendReplyStart=${t3 - t2}ms (total=${t3 - t0}ms)`);
 
   // Record inbound session in background (non-blocking)
   const storePath = channelRuntime.session.resolveStorePath(
@@ -382,6 +391,7 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
   };
 
   // Create reply dispatcher — deliver sends streaming chunks over WebSocket
+  const t4 = Date.now();
   const { dispatcher, replyOptions, markDispatchIdle } =
     channelRuntime.reply.createReplyDispatcherWithTyping({
       humanDelay,
@@ -518,6 +528,9 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
       },
     };
 
+    const t5 = Date.now();
+    log("info", `⏱️ timing: createDispatcher=${t4 - t3}ms dispatchSetup=${t5 - t4}ms`);
+
     await channelRuntime.reply.withReplyDispatcher({
       dispatcher,
       run: () =>
@@ -528,6 +541,9 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
           replyOptions,
         }),
     });
+
+    const t6 = Date.now();
+    log("info", `⏱️ timing: dispatchReplyFromConfig=${t6 - t5}ms total=${t6 - t0}ms`);
 
     // All chunks delivered — send final reply_end with full text and timing
     const finalText = accumulatedText;
@@ -563,10 +579,13 @@ async function handleTextMessage(ws, client, msg, cfg) {
     return;
   }
 
+  const ht0 = Date.now();
   log("info", `text from ${ws._clientId}: ${msg.content.slice(0, 100)}`);
 
   try {
     await dispatchToAgent(ws, msg, cfg, {});
+    const ht1 = Date.now();
+    log("info", `⏱️ handleTextMessage total=${ht1 - ht0}ms`);
   } catch (err) {
     log("error", `dispatch error: ${err.message || String(err)}`);
     sendError(ws, "PROCESSING_ERROR", err.message || String(err));
