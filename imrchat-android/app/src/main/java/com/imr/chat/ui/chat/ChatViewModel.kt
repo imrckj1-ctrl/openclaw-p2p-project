@@ -13,6 +13,7 @@ import com.imr.chat.network.MediaSender
 import com.imr.chat.network.WebSocketClient
 import com.imr.chat.network.WebSocketListener
 import com.imr.chat.network.protocol.CommandInfo
+import com.imr.chat.network.protocol.TextMessage
 import com.imr.chat.service.ChatService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
