@@ -1,0 +1,41 @@
+# Android
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.apk
+*.aab
+*.jks
+*.keystore
+
+# Android app build
+imrchat-android/app/build/
+imrchat-android/build/
+imrchat-android/.gradle/
+imrchat-android/.idea/
+imrchat-android/local.properties
+
+# Node.js
+node_modules/
+npm-debug.log*
+.pnpm-debug.log*
+
+# OpenClaw runtime
+.openclaw/
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo

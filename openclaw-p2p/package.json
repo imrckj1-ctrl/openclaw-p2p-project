@@ -1,0 +1,21 @@
+{
+  "name": "openclaw-p2p",
+  "version": "0.1.0",
+  "description": "OpenClaw P2P WebSocket channel plugin for IMRChat",
+  "main": "./index.js",
+  "type": "commonjs",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "uuid": "^11.1.0"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.22"
+  },
+  "openclaw": {
+    "extensions": ["./index.js"]
+  }
+}
