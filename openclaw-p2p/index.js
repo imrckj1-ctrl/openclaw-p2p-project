@@ -505,12 +505,25 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
     });
 
   try {
+    // Build P2P-optimized config: disable thinking since reasoning stream
+    // is not authorized for non-platform channels (canUseReasoningState check)
+    const p2pCfg = {
+      ...cfg,
+      agents: {
+        ...cfg.agents,
+        defaults: {
+          ...cfg.agents?.defaults,
+          thinkingDefault: "off",
+        },
+      },
+    };
+
     await channelRuntime.reply.withReplyDispatcher({
       dispatcher,
       run: () =>
         channelRuntime.reply.dispatchReplyFromConfig({
           ctx: finalized,
-          cfg,
+          cfg: p2pCfg,
           dispatcher,
           replyOptions,
         }),
