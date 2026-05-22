@@ -19,6 +19,7 @@ const DEFAULT_PORT = 18790;
 const AUTH_TIMEOUT_MS = 10_000;
 const HEARTBEAT_INTERVAL_MS = 30_000;
 const MAX_OFFLINE_CACHE = 100;
+const MEDIA_BUFFER_TTL_MS = 5 * 60 * 1000; // 5 minutes
 
 // ---------------------------------------------------------------------------
 // State
@@ -26,6 +27,7 @@ const MAX_OFFLINE_CACHE = 100;
 let wss = null;
 let httpServer = null;
 let heartbeatTimer = null;
+let mediaBufferCleanupTimer = null;
 let wssReadyReject = null; // reject for pending listening promise
 let stopResolver = null; // resolve when server stops — keeps startAccount alive
 const connectedClients = new Map(); // clientId -> { ws, authenticated, lastActivity }
@@ -121,6 +123,16 @@ function sendReplyChunk(ws, msgId, content) {
   sendJson(ws, { type: "reply_chunk", msgId, content });
 }
 
+// Pre-serialized chunk sender: avoids JSON.stringify on every streaming chunk
+function makeChunkSender(ws, type, msgId) {
+  const prefix = JSON.stringify({ type, msgId, content: "" }).slice(0, -2);
+  return (content) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(prefix + JSON.stringify(content).slice(1));
+    }
+  };
+}
+
 function sendReplyEnd(ws, msgId, fullContent, meta = {}) {
   sendJson(ws, { type: "reply_end", msgId, fullContent, ...meta });
 }
@@ -159,13 +171,17 @@ function splitForStreaming(text) {
   return chunks;
 }
 
-// Parse <think> tags from text — returns { thinking, answer }
 function splitReasoningText(text) {
-  const match = text.match(/<think>([\s\S]*?)<\/think>/);
-  if (!match) return { thinking: null, answer: text };
-  const thinking = match[1].trim();
-  const answer = text.slice(0, match.index) + text.slice(match.index + match[0].length);
-  return { thinking, answer: answer.trim() };
+  const re = /<think>([\s\S]*?)<\/think>/g;
+  const matches = [...text.matchAll(re)];
+  if (matches.length === 0) return { thinking: null, answer: text };
+  const thinking = matches.map((m) => m[1].trim()).filter(Boolean).join("\n");
+  let answer = text;
+  for (let i = matches.length - 1; i >= 0; i--) {
+    const m = matches[i];
+    answer = answer.slice(0, m.index) + answer.slice(m.index + m[0].length);
+  }
+  return { thinking: thinking || null, answer: answer.trim() };
 }
 
 function sendOfflineMessages(ws) {
@@ -230,7 +246,8 @@ async function handleMessage(ws, raw, cfg) {
   if (!client.authenticated) {
     if (msg.type === "auth") {
       const expectedToken = getToken(cfg);
-      log("info", `auth attempt: expectedToken="${expectedToken}", receivedToken="${msg.token}", clientId="${msg.clientId}"`);
+      const maskToken = (t) => t ? t.slice(0, 4) + "***" : "(empty)";
+      log("info", `auth attempt: expectedToken=${maskToken(expectedToken)} receivedToken=${maskToken(msg.token)} clientId="${msg.clientId}"`);
       if (!expectedToken || msg.token === expectedToken) {
         client.authenticated = true;
         // Use client-provided persistent ID for session continuity
@@ -308,13 +325,19 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
   const replyMsgId = randomUUID();
 
   if (!channelRuntime) {
-    log("warn", "channelRuntime not available, using echo fallback");
-    const echoText = `[echo] ${msg.content || "(empty)"}`;
-    const now = Date.now();
-    sendReplyStart(ws, replyMsgId, msg.msgId, { model: "echo", startedAt: now });
-    sendReplyChunk(ws, replyMsgId, echoText);
-    sendReplyEnd(ws, replyMsgId, echoText, { elapsedMs: Date.now() - now, model: "echo", charCount: echoText.length });
-    return;
+    // Retry: runtime may have been registered after plugin init
+    if (pluginApi?.runtime?.channel) {
+      channelRuntime = pluginApi.runtime.channel;
+      log("info", "channelRuntime recovered on first dispatch");
+    } else {
+      log("warn", "channelRuntime not available, using echo fallback");
+      const echoText = `[echo] ${msg.content || "(empty)"}`;
+      const now = Date.now();
+      sendReplyStart(ws, replyMsgId, msg.msgId, { model: "echo", startedAt: now });
+      sendReplyChunk(ws, replyMsgId, echoText);
+      sendReplyEnd(ws, replyMsgId, echoText, { elapsedMs: Date.now() - now, model: "echo", charCount: echoText.length });
+      return;
+    }
   }
 
   const t0 = Date.now();
@@ -372,6 +395,10 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
   // No artificial typing delay for p2p
   const humanDelay = undefined;
 
+  // Pre-serialized chunk senders for hot streaming path
+  const sendReplyChunkFast = makeChunkSender(ws, "reply_chunk", replyMsgId);
+  const sendThinkingChunkFast = makeChunkSender(ws, "thinking_chunk", replyMsgId);
+
   // Accumulate full text across streaming chunks
   let accumulatedText = "";
   let accumulatedThinkingText = "";
@@ -409,7 +436,7 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
             const chunks = splitForStreaming(thinkingText);
             for (const chunk of chunks) {
               if (ws.readyState !== WebSocket.OPEN) break;
-              sendThinkingChunk(ws, replyMsgId, chunk);
+              sendThinkingChunkFast(chunk);
             }
           }
           return;
@@ -427,7 +454,7 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
             const chunks = splitForStreaming(thinking);
             for (const chunk of chunks) {
               if (ws.readyState !== WebSocket.OPEN) break;
-              sendThinkingChunk(ws, replyMsgId, chunk);
+              sendThinkingChunkFast(chunk);
             }
             sendThinkingEnd(ws, replyMsgId, accumulatedThinkingText);
             thinkingActive = false;
@@ -485,7 +512,7 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
           const chunks = splitForStreaming(text);
           for (const chunk of chunks) {
             if (ws.readyState !== WebSocket.OPEN) break;
-            sendReplyChunk(ws, replyMsgId, chunk);
+            sendReplyChunkFast(chunk);
           }
         }
       },
@@ -595,12 +622,12 @@ async function handleTextMessage(ws, client, msg, cfg) {
 // Media message handling
 const mediaBuffers = new Map(); // msgId -> { chunks, fileName, mimeType, ... }
 
-function saveMediaFile(fileName, data, mimeType) {
+async function saveMediaFile(fileName, data, mimeType) {
   const ext = path.extname(fileName) || (mimeType.startsWith("image/") ? ".jpg" : ".bin");
   const baseName = path.basename(fileName, ext);
   const uniqueName = `${baseName}_${Date.now()}${ext}`;
   const filePath = path.join(MEDIA_DIR, uniqueName);
-  fs.writeFileSync(filePath, data);
+  await fs.promises.writeFile(filePath, data);
   return filePath;
 }
 
@@ -621,21 +648,20 @@ function localFileToUrl(filePath, reqHost) {
   return `http://${host}/media/${encodeURIComponent(fileName)}`;
 }
 
-function handleMediaMessage(ws, client, msg, cfg) {
-  const getConfig2 = getConfig(cfg);
+async function handleMediaMessage(ws, client, msg, cfg) {
+  const cfg2 = getConfig(cfg);
   const maxSize = msg.type.startsWith("image")
-    ? (getConfig2.maxImageSize ?? 10485760)
-    : (getConfig2.maxFileSize ?? 52428800);
+    ? (cfg2.maxImageSize ?? 10485760)
+    : (cfg2.maxFileSize ?? 52428800);
 
   if (msg.type === "image" || msg.type === "file") {
-    // Direct send (small file)
     const data = Buffer.from(msg.data, "base64");
     if (data.length > maxSize) {
       sendError(ws, "FILE_TOO_LARGE", `文件超过 ${Math.round(maxSize / 1024 / 1024)}MB 限制`);
       return;
     }
     log("info", `${msg.type} from ${ws._clientId}: ${msg.fileName} (${data.length} bytes)`);
-    const filePath = saveMediaFile(msg.fileName, data, msg.mimeType);
+    const filePath = await saveMediaFile(msg.fileName, data, msg.mimeType);
     log("info", `saved to: ${filePath}`);
     sendSystem(ws, `收到${msg.type === "image" ? "图片" : "文件"}: ${msg.fileName}`);
 
@@ -651,21 +677,31 @@ function handleMediaMessage(ws, client, msg, cfg) {
       mimeType: msg.mimeType,
       totalSize: msg.totalSize,
       totalChunks: msg.totalChunks,
-      chunks: [],
+      chunks: new Array(msg.totalChunks),
+      createdAt: Date.now(),
     });
     log("info", `${msg.type} start: ${msg.fileName} (${msg.totalChunks} chunks)`);
   } else if (msg.type.endsWith("_chunk")) {
     const buffer = mediaBuffers.get(msg.msgId);
-    if (buffer) {
+    if (buffer && msg.chunkIndex >= 0 && msg.chunkIndex < buffer.totalChunks) {
+      if (buffer.chunks[msg.chunkIndex] !== undefined) {
+        log("warn", `duplicate chunk ${msg.chunkIndex} for ${msg.msgId}, ignoring`);
+        return;
+      }
       buffer.chunks[msg.chunkIndex] = msg.data;
     }
   } else if (msg.type.endsWith("_end")) {
     const buffer = mediaBuffers.get(msg.msgId);
     if (buffer) {
+      if (buffer.chunks.some((c) => c === undefined)) {
+        sendError(ws, "INCOMPLETE_UPLOAD", "文件上传不完整");
+        mediaBuffers.delete(msg.msgId);
+        return;
+      }
       const combined = buffer.chunks.join("");
       const data = Buffer.from(combined, "base64");
       log("info", `${msg.type} complete: ${buffer.fileName} (${data.length} bytes)`);
-      const filePath = saveMediaFile(buffer.fileName, data, buffer.mimeType);
+      const filePath = await saveMediaFile(buffer.fileName, data, buffer.mimeType);
       log("info", `saved to: ${filePath}`);
       mediaBuffers.delete(msg.msgId);
       sendSystem(ws, `收到${msg.type.startsWith("image") ? "图片" : "文件"}: ${buffer.fileName}`);
@@ -803,7 +839,7 @@ const p2pChannelPlugin = {
 
       // Create WebSocket server attached to HTTP server
       serverPort = port;
-      wss = new WebSocketServer({ server: httpServer });
+      wss = new WebSocketServer({ server: httpServer, maxPayload: 64 * 1024 * 1024 }); // 64MB limit
 
       // Wait for server to be ready before reporting running status
       await new Promise((resolve, reject) => {
@@ -878,12 +914,24 @@ const p2pChannelPlugin = {
         wss.clients.forEach((ws) => {
           if (!ws.isAlive) {
             log("info", `heartbeat timeout: ${ws._clientId}`);
-            return ws.terminate();
+            ws.close(4001, "heartbeat timeout");
+            return;
           }
           ws.isAlive = false;
           ws.ping();
         });
       }, HEARTBEAT_INTERVAL_MS);
+
+      // Periodically clean up stale media upload buffers
+      mediaBufferCleanupTimer = setInterval(() => {
+        const now = Date.now();
+        for (const [msgId, buf] of mediaBuffers) {
+          if (now - buf.createdAt > MEDIA_BUFFER_TTL_MS) {
+            log("warn", `media buffer expired: ${msgId} (${buf.fileName})`);
+            mediaBuffers.delete(msgId);
+          }
+        }
+      }, 60_000);
 
       // Abort signal
       ctx.abortSignal?.addEventListener("abort", () => {
@@ -908,12 +956,19 @@ const p2pChannelPlugin = {
   outbound: {
     sendText: async (params) => {
       const { to, text } = params;
-      // Find client by target id, or broadcast to all authenticated clients
       let sent = false;
-      for (const [, client] of connectedClients) {
-        if (client.authenticated) {
+      if (to) {
+        const client = connectedClients.get(to);
+        if (client?.authenticated) {
           sendReplyChunk(client.ws, randomUUID(), text);
           sent = true;
+        }
+      } else {
+        for (const [, client] of connectedClients) {
+          if (client.authenticated) {
+            sendReplyChunk(client.ws, randomUUID(), text);
+            sent = true;
+          }
         }
       }
       return { success: sent };
@@ -930,6 +985,11 @@ function stopServer() {
     clearInterval(heartbeatTimer);
     heartbeatTimer = null;
   }
+  if (mediaBufferCleanupTimer) {
+    clearInterval(mediaBufferCleanupTimer);
+    mediaBufferCleanupTimer = null;
+  }
+  mediaBuffers.clear();
   if (wss) {
     wss.clients.forEach((ws) => ws.close(1001, "Server shutting down"));
     wss.close();

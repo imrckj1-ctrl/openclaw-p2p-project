@@ -205,6 +205,13 @@ data class ThinkingEndMessage(
     override val type = "thinking_end"
 }
 
+data class TypingMessage(
+    val clientId: String,
+    val typing: Boolean
+) : WsMessage {
+    override val type = "typing"
+}
+
 data class OfflineDone(
     override val type: String = "offline_done"
 ) : WsMessage
@@ -218,19 +225,20 @@ object MessageParser {
         return try {
             val obj = JsonParser.parseString(json).asJsonObject
             when (obj.get("type")?.asString) {
-                "auth_result" -> gson.fromJson(json, AuthResultMessage::class.java)
-                "reply_start" -> gson.fromJson(json, ReplyStartMessage::class.java)
-                "reply_chunk" -> gson.fromJson(json, ReplyChunkMessage::class.java)
-                "reply_end" -> gson.fromJson(json, ReplyEndMessage::class.java)
-                "commands" -> gson.fromJson(json, CommandsMessage::class.java)
-                "system" -> gson.fromJson(json, SystemMessage::class.java)
-                "error" -> gson.fromJson(json, ErrorMessage::class.java)
-                "offline_messages" -> gson.fromJson(json, OfflineMessagesStart::class.java)
+                "auth_result" -> gson.fromJson(obj, AuthResultMessage::class.java)
+                "reply_start" -> gson.fromJson(obj, ReplyStartMessage::class.java)
+                "reply_chunk" -> gson.fromJson(obj, ReplyChunkMessage::class.java)
+                "reply_end" -> gson.fromJson(obj, ReplyEndMessage::class.java)
+                "commands" -> gson.fromJson(obj, CommandsMessage::class.java)
+                "system" -> gson.fromJson(obj, SystemMessage::class.java)
+                "error" -> gson.fromJson(obj, ErrorMessage::class.java)
+                "offline_messages" -> gson.fromJson(obj, OfflineMessagesStart::class.java)
                 "offline_done" -> OfflineDone()
-                "media" -> gson.fromJson(json, MediaMessage::class.java)
-                "thinking_start" -> gson.fromJson(json, ThinkingStartMessage::class.java)
-                "thinking_chunk" -> gson.fromJson(json, ThinkingChunkMessage::class.java)
-                "thinking_end" -> gson.fromJson(json, ThinkingEndMessage::class.java)
+                "media" -> gson.fromJson(obj, MediaMessage::class.java)
+                "thinking_start" -> gson.fromJson(obj, ThinkingStartMessage::class.java)
+                "thinking_chunk" -> gson.fromJson(obj, ThinkingChunkMessage::class.java)
+                "thinking_end" -> gson.fromJson(obj, ThinkingEndMessage::class.java)
+                "typing" -> gson.fromJson(obj, TypingMessage::class.java)
                 else -> null
             }
         } catch (e: Exception) {

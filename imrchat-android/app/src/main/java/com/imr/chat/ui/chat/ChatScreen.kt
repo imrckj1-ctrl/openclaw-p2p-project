@@ -453,20 +453,27 @@ fun StreamingCard(
                     )
                 }
 
-                // Reply content
+                // Reply content with Markdown rendering
                 if (content.isEmpty()) {
-                    // Empty state: pulsing dots
                     Text(
                         text = "..." + if (cursorVisible) "▎" else "",
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         style = MaterialTheme.typography.bodyMedium
                     )
                 } else {
-                    Text(
-                        text = content + if (cursorVisible) "▎" else "",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
+                    Column {
+                        MarkdownRenderer(
+                            content = content,
+                            isDarkTheme = false
+                        )
+                        if (cursorVisible) {
+                            Text(
+                                text = "▎",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        }
+                    }
                 }
                 // Live footer
                 Spacer(modifier = Modifier.height(6.dp))

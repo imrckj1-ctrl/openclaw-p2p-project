@@ -34,7 +34,7 @@ class MainActivity : ComponentActivity() {
 
             val settingsViewModel: SettingsViewModel = viewModel(
                 viewModelStoreOwner = activity,
-                factory = SettingsViewModel.Factory(app.settingsStore)
+                factory = SettingsViewModel.Factory(app.settingsStore, app.database)
             )
             val settings by settingsViewModel.settings.collectAsState()
 

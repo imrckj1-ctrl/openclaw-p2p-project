@@ -10,7 +10,10 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
-class SettingsViewModel(private val settingsStore: SettingsStore) : ViewModel() {
+class SettingsViewModel(
+    private val settingsStore: SettingsStore,
+    private val database: com.imr.chat.data.db.AppDatabase
+) : ViewModel() {
 
     val settings = settingsStore.settings.stateIn(
         viewModelScope,
@@ -62,14 +65,18 @@ class SettingsViewModel(private val settingsStore: SettingsStore) : ViewModel() 
 
     fun clearChatHistory(onDone: () -> Unit) {
         viewModelScope.launch {
+            database.messageDao().deleteAll()
             onDone()
         }
     }
 
-    class Factory(private val settingsStore: SettingsStore) : ViewModelProvider.Factory {
+    class Factory(
+        private val settingsStore: SettingsStore,
+        private val database: com.imr.chat.data.db.AppDatabase
+    ) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return SettingsViewModel(settingsStore) as T
+            return SettingsViewModel(settingsStore, database) as T
         }
     }
 }

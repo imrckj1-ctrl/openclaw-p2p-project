@@ -46,6 +46,9 @@ class ChatViewModel(
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    // Offline outgoing message queue
+    private val pendingQueue = mutableListOf<String>()
+
     init {
         // Load messages from DB
         viewModelScope.launch {
@@ -58,6 +61,9 @@ class ChatViewModel(
         webSocketClient.setListener(object : WebSocketListener {
             override fun onStateChanged(state: ConnectionState) {
                 _uiState.update { it.copy(connectionState = state) }
+                if (state == ConnectionState.CONNECTED) {
+                    flushPendingQueue()
+                }
             }
 
             override fun onAuthResult(ok: Boolean, reason: String?) {
@@ -166,10 +172,13 @@ class ChatViewModel(
             }
 
             override fun onThinkingEnd(msgId: String, fullContent: String) {
-                // Thinking complete — content stays visible for the reply card
                 _uiState.update {
                     it.copy(streamingThinkingContent = fullContent)
                 }
+            }
+
+            override fun onTyping(clientId: String, typing: Boolean) {
+                // Typing indicator from peer — could show in UI if needed
             }
         })
 
@@ -218,7 +227,16 @@ class ChatViewModel(
             )
         }
 
-        webSocketClient.sendText(content)
+        if (webSocketClient.isConnected()) {
+            webSocketClient.sendText(content)
+        } else {
+            // Queue for sending when reconnected
+            pendingQueue.add(gson.toJson(TextMessage(
+                msgId = msgId,
+                content = content,
+                timestamp = System.currentTimeMillis()
+            )))
+        }
         _uiState.update { it.copy(currentInput = "") }
     }
 
@@ -274,6 +292,15 @@ class ChatViewModel(
         _uiState.update { it.copy(thinkingExpanded = !it.thinkingExpanded) }
     }
 
+    private fun flushPendingQueue() {
+        if (pendingQueue.isEmpty()) return
+        val toSend = pendingQueue.toList()
+        pendingQueue.clear()
+        for (json in toSend) {
+            webSocketClient.send(json)
+        }
+    }
+
     private suspend fun saveSystemMessage(content: String) {
         messageDao.insert(
             MessageEntity(
@@ -290,6 +317,10 @@ class ChatViewModel(
         super.onCleared()
         webSocketClient.disconnect()
         ChatService.stop(context)
+    }
+
+    companion object {
+        private val gson = com.google.gson.Gson()
     }
 
     class Factory(
