@@ -185,7 +185,7 @@ OpenClaw P2P Chat 是一个基于 [OpenClaw](https://github.com/anthropics/openc
 
 ### 下载
 
-[下载最新 APK (v0.1.1)](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.1/IMRChat-v0.1.1-debug.apk)
+[下载最新 APK (v0.1.3)](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.3/IMRChat-v0.1.3-debug.apk)
 
 或克隆源码自行构建（参见下方安装部署部分）。
 
