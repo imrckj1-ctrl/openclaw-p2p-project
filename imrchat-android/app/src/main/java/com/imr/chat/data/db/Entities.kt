@@ -4,9 +4,7 @@ import androidx.room.*
 
 @Entity(tableName = "messages")
 data class MessageEntity(
-    @PrimaryKey(autoGenerate = true)
-    val id: Long = 0,
-
+    @PrimaryKey
     @ColumnInfo(name = "msg_id")
     val msgId: String,
 

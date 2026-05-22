@@ -2,6 +2,7 @@ package com.imr.chat.network
 
 import com.imr.chat.network.protocol.*
 import com.google.gson.Gson
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,6 +29,7 @@ interface WebSocketListener {
     fun onThinkingStart(msgId: String, replyTo: String)
     fun onThinkingChunk(msgId: String, content: String)
     fun onThinkingEnd(msgId: String, fullContent: String)
+    fun onTyping(clientId: String, typing: Boolean)
 }
 
 class WebSocketClient {
@@ -46,6 +48,8 @@ class WebSocketClient {
     private var lastPort: Int = 0
     private var lastToken: String = ""
     private var lastUseWss: Boolean = false
+
+    private val reconnectScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     private val client = OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
@@ -109,7 +113,6 @@ class WebSocketClient {
                 if (msg.ok) {
                     setState(ConnectionState.CONNECTED)
                     reconnectAttempt = 0
-                    // Request command list
                     send(gson.toJson(GetCommandsMessage()))
                 }
                 listener?.onAuthResult(msg.ok, msg.reason)
@@ -126,6 +129,7 @@ class WebSocketClient {
             is ThinkingStartMessage -> listener?.onThinkingStart(msg.msgId, msg.replyTo)
             is ThinkingChunkMessage -> listener?.onThinkingChunk(msg.msgId, msg.content)
             is ThinkingEndMessage -> listener?.onThinkingEnd(msg.msgId, msg.fullContent)
+            is TypingMessage -> listener?.onTyping(msg.clientId, msg.typing)
         }
     }
 
@@ -145,8 +149,14 @@ class WebSocketClient {
         return msgId
     }
 
+    fun sendTyping(typing: Boolean) {
+        val msg = TypingMessage(clientId = clientId, typing = typing)
+        send(gson.toJson(msg))
+    }
+
     fun disconnect() {
         shouldReconnect = false
+        reconnectScope.cancel()
         webSocket?.close(1000, "User disconnect")
         webSocket = null
         setState(ConnectionState.DISCONNECTED)
@@ -163,12 +173,12 @@ class WebSocketClient {
         val delay = reconnectDelays.getOrElse(reconnectAttempt) { 30000L }
         reconnectAttempt++
 
-        Thread {
-            Thread.sleep(delay)
+        reconnectScope.launch {
+            delay(delay)
             if (shouldReconnect && _connectionState.value == ConnectionState.DISCONNECTED) {
                 doConnect(lastHost, lastPort, lastToken, lastUseWss)
             }
-        }.start()
+        }
     }
 
     private fun setState(state: ConnectionState) {
