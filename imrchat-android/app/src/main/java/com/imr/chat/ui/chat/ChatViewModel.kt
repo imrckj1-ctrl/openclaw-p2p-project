@@ -135,7 +135,7 @@ class ChatViewModel(
             }
 
             override fun onSystemMessage(content: String, level: String) {
-                viewModelScope.launch { saveSystemMessage(content) }
+                // Connection status messages are now ignored
             }
 
             override fun onError(code: String, message: String) {
