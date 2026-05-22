@@ -17,7 +17,7 @@ OpenClaw P2P Chat is a lightweight real-time chat system built on the [OpenClaw]
 
 ### Download
 
-[Download Latest APK (v0.1.1)](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.1/IMRChat-v0.1.1-debug.apk)
+[Download Latest APK (v0.1.2)](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.2/IMRChat-v0.1.2-debug.apk)
 
 Or clone and build from source (see Installation section below).
 
