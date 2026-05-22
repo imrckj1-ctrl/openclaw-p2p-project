@@ -335,13 +335,19 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
   // Finalize inbound context
   const finalized = channelRuntime.reply.finalizeInboundContext(ctx);
 
-  // Record inbound session
+  // Announce reply start IMMEDIATELY — don't wait for session recording
+  sendReplyStart(ws, replyMsgId, msg.msgId, {
+    model: modelName,
+    startedAt: dispatchStartTime,
+  });
+
+  // Record inbound session in background (non-blocking)
   const storePath = channelRuntime.session.resolveStorePath(
     cfg.session?.store,
     { agentId: route.agentId },
   );
 
-  await channelRuntime.session.recordInboundSession({
+  channelRuntime.session.recordInboundSession({
     storePath,
     sessionKey: route.sessionKey,
     ctx: finalized,
@@ -356,12 +362,6 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
 
   // No artificial typing delay for p2p
   const humanDelay = undefined;
-
-  // Announce reply start with card metadata
-  sendReplyStart(ws, replyMsgId, msg.msgId, {
-    model: modelName,
-    startedAt: dispatchStartTime,
-  });
 
   // Accumulate full text across streaming chunks
   let accumulatedText = "";
@@ -400,7 +400,6 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
             for (const chunk of chunks) {
               if (ws.readyState !== WebSocket.OPEN) break;
               sendThinkingChunk(ws, replyMsgId, chunk);
-              await new Promise(r => setTimeout(r, 10));
             }
           }
           return;
@@ -419,7 +418,6 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
             for (const chunk of chunks) {
               if (ws.readyState !== WebSocket.OPEN) break;
               sendThinkingChunk(ws, replyMsgId, chunk);
-              await new Promise(r => setTimeout(r, 10));
             }
             sendThinkingEnd(ws, replyMsgId, accumulatedThinkingText);
             thinkingActive = false;
@@ -472,13 +470,12 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
           }
         }
 
-        // Stream text chunks
+        // Stream text chunks without artificial delay
         if (text && wsOpen) {
           const chunks = splitForStreaming(text);
           for (const chunk of chunks) {
             if (ws.readyState !== WebSocket.OPEN) break;
             sendReplyChunk(ws, replyMsgId, chunk);
-            await new Promise(r => setTimeout(r, 8));
           }
         }
       },
@@ -508,12 +505,25 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
     });
 
   try {
+    // Build P2P-optimized config: disable thinking since reasoning stream
+    // is not authorized for non-platform channels (canUseReasoningState check)
+    const p2pCfg = {
+      ...cfg,
+      agents: {
+        ...cfg.agents,
+        defaults: {
+          ...cfg.agents?.defaults,
+          thinkingDefault: "off",
+        },
+      },
+    };
+
     await channelRuntime.reply.withReplyDispatcher({
       dispatcher,
       run: () =>
         channelRuntime.reply.dispatchReplyFromConfig({
           ctx: finalized,
-          cfg,
+          cfg: p2pCfg,
           dispatcher,
           replyOptions,
         }),
