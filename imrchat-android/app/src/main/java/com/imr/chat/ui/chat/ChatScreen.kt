@@ -282,18 +282,6 @@ fun MessageBubble(message: MessageEntity) {
             "reply" -> {
                 // AI reply card with Markdown rendering
                 Column {
-                    if (message.elapsedMs != null) {
-                        Text(
-                            text = formatElapsed(message.elapsedMs),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier
-                                .widthIn(max = 320.dp)
-                                .padding(bottom = 2.dp),
-                            maxLines = 1
-                        )
-                    }
-
                     Card(
                         modifier = Modifier.widthIn(max = 320.dp),
                         shape = RoundedCornerShape(
