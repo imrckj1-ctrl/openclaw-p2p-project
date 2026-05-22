@@ -15,6 +15,12 @@ OpenClaw P2P Chat is a lightweight real-time chat system built on the [OpenClaw]
 - **openclaw-p2p** — A WebSocket plugin for the OpenClaw gateway that bridges AI model responses to connected clients over a persistent WebSocket connection, with built-in HTTP media server for file/image delivery.
 - **imrchat-android** — A native Android chat application built with Jetpack Compose, providing a clean mobile interface for interacting with AI models through the P2P plugin.
 
+### Download
+
+[Download Latest APK (v0.1.1)](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.1/IMRChat-v0.1.1-debug.apk)
+
+Or clone and build from source (see Installation section below).
+
 ### Features
 
 **P2P Plugin (Server)**
@@ -176,6 +182,12 @@ OpenClaw P2P Chat 是一个基于 [OpenClaw](https://github.com/anthropics/openc
 
 - **openclaw-p2p** — OpenClaw 网关的 WebSocket 插件，通过持久 WebSocket 连接将 AI 模型响应桥接到已连接的客户端，内置 HTTP 媒体服务器用于文件/图片传输。
 - **imrchat-android** — 使用 Jetpack Compose 构建的原生 Android 聊天应用，提供简洁的移动端界面，通过 P2P 插件与 AI 模型交互。
+
+### 下载
+
+[下载最新 APK (v0.1.1)](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.1/IMRChat-v0.1.1-debug.apk)
+
+或克隆源码自行构建（参见下方安装部署部分）。
 
 ### 功能特性
 
