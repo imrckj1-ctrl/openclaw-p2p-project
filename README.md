@@ -21,7 +21,7 @@ OpenClaw P2P Chat is a lightweight real-time AI chat system built on the [OpenCl
 
 | Version | Download | Release Date |
 |---------|----------|-------------|
-| **v0.1.3** (latest) | [IMRChat-v0.1.3-debug.apk](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.3/IMRChat-v0.1.3-debug.apk) | 2026-05-22 |
+| **v0.1.4** (latest) | [IMRChat-v0.1.4-debug.apk](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.4/IMRChat-v0.1.4-debug.apk) | 2026-05-25 |
 
 Or build from source: `cd imrchat-android && ./gradlew assembleDebug`
 
@@ -37,7 +37,7 @@ Or build from source: `cd imrchat-android && ./gradlew assembleDebug`
 | **Media** | Built-in HTTP media server for serving uploaded images/files; supports PNG/GIF/WebP/JPEG |
 | **File Transfer** | 64KB chunked upload for large files (max 50MB per file, 10MB per image) |
 | **Offline** | Message caching for disconnected clients with configurable limit (default 100) |
-| **Security** | Token masked in logs, targeted message routing by client ID |
+| **Security** | TLS/WSS encryption with self-signed cert support, token masked in logs, targeted message routing by client ID |
 | **Recovery** | Lazy channelRuntime recovery, graceful WebSocket close, media buffer TTL cleanup (5min) |
 
 #### Android App (Client)
@@ -49,23 +49,25 @@ Or build from source: `cd imrchat-android && ./gradlew assembleDebug`
 | **Thinking** | Collapsible thinking/reasoning display |
 | **Media** | Image/file sending via content picker; received images loaded with Coil |
 | **Copy** | Long-press any message bubble to copy; text selection on all message types |
+| **TLS** | WSS/HTTPS support — trusts self-signed certificates automatically; toggle in settings |
 | **Storage** | Room SQLite local storage with proper database migrations |
 | **Offline** | Outgoing message queue — messages queued when disconnected, auto-flushed on reconnect |
 | **Voice** | Voice input via Android SpeechRecognizer (Chinese) |
 | **Commands** | Slash-command support with autocomplete suggestions |
 | **Settings** | Multiple server configs, dark mode toggle, clear chat history |
 | **Connectivity** | Coroutine-based reconnection with exponential backoff (3s → 5s → 10s → 30s) |
+| **Typing** | Typing indicator (send/receive) for real-time conversation feedback |
 
 ### Architecture
 
 ```
 ┌──────────────────┐                    ┌───────────────────┐
-│  Android App     │    WebSocket       │  OpenClaw Gateway │
+│  Android App     │   WSS/WS           │  OpenClaw Gateway │
 │  (Jetpack        │◄══════════════════►│  (port 18789)     │
-│   Compose)       │    port 18790       │       │           │
+│   Compose)       │   port 18790        │       │           │
 └──────────────────┘                    │  ┌────┴────────┐  │
         │                               │  │ P2P Plugin  │  │
-        │ HTTP (media)                  │  │ (port 18790) │  │
+        │ HTTPS/HTTP (media)            │  │ (port 18790) │  │
         ▼                               │  └────┬────────┘  │
 ┌──────────────────┐                    │       │           │
 │  Media Files     │                    │  OpenClaw API     │
@@ -116,7 +118,7 @@ openclaw-p2p-project/
 │   ├── app/build.gradle.kts
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── IMRChat-v0.1.3-debug.apk          # Latest prebuilt APK
+├── IMRChat-v0.1.4-debug.apk          # Latest prebuilt APK
 └── README.md
 ```
 
@@ -166,6 +168,30 @@ Add to `~/.openclaw/openclaw.json`:
 
 Then restart the gateway. Check `openclaw logs` or the gateway control UI to confirm the plugin is running and listening.
 
+##### Enabling TLS/WSS Encryption (Recommended)
+
+Generate a self-signed certificate for encrypted WSS/HTTPS connections:
+
+```bash
+mkdir -p ~/.openclaw/p2p-cert
+openssl req -x509 -newkey rsa:4096 -keyout ~/.openclaw/p2p-cert/key.pem \
+  -out ~/.openclaw/p2p-cert/cert.pem -days 3650 -nodes \
+  -subj "/CN=192.168.31.168"   # Replace with your server's LAN IP or domain
+```
+
+Then add `certPath` and `keyPath` to the plugin config:
+
+```json
+"config": {
+  "port": 18790,
+  "token": "your-secret-token-here",
+  "certPath": "/home/<user>/.openclaw/p2p-cert/cert.pem",
+  "keyPath": "/home/<user>/.openclaw/p2p-cert/key.pem"
+}
+```
+
+When both files exist and are readable, the plugin automatically enables TLS — the gateway log will show "TLS enabled — serving WSS/HTTPS". If the files are missing, it falls back to unencrypted HTTP/WS mode.
+
 #### 3. Install the Android App
 
 - **Prebuilt APK**: Download from [Releases](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases) and install directly.
@@ -178,7 +204,7 @@ In the app, go to **Settings** and add a server:
 | Host | Your server's LAN IP (e.g. `192.168.x.x`) |
 | Port | `18790` |
 | Token | Same token from gateway config |
-| SSL | Off (unless you set up WSS) |
+| SSL | **On** (if TLS is configured on server — app auto-trusts self-signed certs) |
 
 ### Plugin Configuration Reference
 
@@ -190,6 +216,8 @@ In the app, go to **Settings** and add a server:
 | `maxFileSize` | number | `52428800` | Max file bytes (50 MB) |
 | `chunkSize` | number | `65536` | File transfer chunk size (64 KB) |
 | `offlineCacheLimit` | number | `100` | Max cached offline messages per client |
+| `certPath` | string | `""` | Path to TLS certificate PEM file (enables WSS/HTTPS) |
+| `keyPath` | string | `""` | Path to TLS private key PEM file (enables WSS/HTTPS) |
 
 ### WebSocket Protocol
 
@@ -249,6 +277,7 @@ Client ◄──reply_end── Server
 | Plugin not running | `openclaw logs` — check for "P2P plugin started" and port binding errors |
 | Images not loading | Ensure media server is reachable. Check `~/.openclaw/p2p-media/` for saved files |
 | Slow responses | First message after cold start includes model warmup (5-8s). Subsequent replies should be fast. |
+| TLS not working | Verify `cert.pem` and `key.pem` exist at configured paths. Check gateway logs for "TLS enabled". Ensure Android SSL toggle matches server mode. |
 
 ### Development
 
@@ -284,7 +313,7 @@ OpenClaw P2P Chat 是一个基于 [OpenClaw](https://github.com/anthropics/openc
 
 | 版本 | 下载 | 发布日期 |
 |------|------|----------|
-| **v0.1.3**（最新） | [IMRChat-v0.1.3-debug.apk](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.3/IMRChat-v0.1.3-debug.apk) | 2026-05-22 |
+| **v0.1.4**（最新） | [IMRChat-v0.1.4-debug.apk](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases/download/v0.1.4/IMRChat-v0.1.4-debug.apk) | 2026-05-25 |
 
 或从源码构建：`cd imrchat-android && ./gradlew assembleDebug`
 
@@ -300,7 +329,7 @@ OpenClaw P2P Chat 是一个基于 [OpenClaw](https://github.com/anthropics/openc
 | **媒体** | 内置 HTTP 媒体服务器，支持 PNG/GIF/WebP/JPEG 图片和文件外网访问 |
 | **文件传输** | 64KB 分片上传（文件最大 50MB，图片最大 10MB） |
 | **离线消息** | 断线消息缓存，重连后自动投递（默认 100 条上限） |
-| **安全** | 日志 Token 脱敏、按 clientId 定向路由 |
+| **安全** | TLS/WSS 加密传输（支持自签证书），日志 Token 脱敏、按 clientId 定向路由 |
 | **容错** | channelRuntime 懒恢复、WebSocket 优雅关闭、媒体缓冲区 5 分钟 TTL 自动清理 |
 
 #### Android 应用（客户端）
@@ -312,22 +341,25 @@ OpenClaw P2P Chat 是一个基于 [OpenClaw](https://github.com/anthropics/openc
 | **思考** | 可折叠的 AI 思考过程展示 |
 | **媒体** | 图片/文件发送，收到的图片用 Coil 加载 |
 | **复制** | 长按任意消息气泡弹出复制菜单，所有文字消息支持选中复制 |
+| **TLS** | WSS/HTTPS 加密——自动信任自签证书，设置页一键开关 |
 | **存储** | Room SQLite 本地存储，带数据库版本迁移 |
 | **离线** | 消息发送队列——断线时自动暂存，重连后自动发送 |
 | **语音** | 语音输入（调用 Android SpeechRecognizer，中文） |
 | **命令** | 斜杠命令 `/` 自动补全提示 |
 | **设置** | 多服务器配置、深色模式、清除聊天记录 |
+| **连接** | 协程式自动重连（3s → 5s → 10s → 30s 指数退避） |
+| **输入状态** | 输入中指示器（发送/接收），实时对话反馈 |
 
 ### 架构
 
 ```
 ┌──────────────────┐                    ┌───────────────────┐
-│  Android 应用    │    WebSocket       │  OpenClaw 网关    │
+│  Android 应用    │   WSS/WS           │  OpenClaw 网关    │
 │  (Jetpack        │◄══════════════════►│  (端口 18789)     │
-│   Compose)       │     端口 18790     │       │           │
+│   Compose)       │    端口 18790      │       │           │
 └──────────────────┘                    │  ┌────┴────────┐  │
         │                               │  │ P2P 插件    │  │
-        │ HTTP（获取媒体文件）              │  │ (端口 18790)│  │
+        │ HTTPS/HTTP（获取媒体文件）       │  │ (端口 18790)│  │
         ▼                               │  └────┬────────┘  │
 ┌──────────────────┐                    │       │           │
 │  媒体文件         │                    │  OpenClaw API     │
@@ -378,7 +410,7 @@ openclaw-p2p-project/
 │   ├── app/build.gradle.kts
 │   ├── build.gradle.kts
 │   └── settings.gradle.kts
-├── IMRChat-v0.1.3-debug.apk          # 最新预编译安装包
+├── IMRChat-v0.1.4-debug.apk          # 最新预编译安装包
 └── README.md
 ```
 
@@ -428,6 +460,30 @@ cd ~/.openclaw/extensions/openclaw-p2p && npm install
 
 重启网关。用 `openclaw logs` 或网关控制面板确认插件已启动并监听端口。
 
+##### 启用 TLS/WSS 加密（推荐）
+
+生成自签名证书用于 WSS/HTTPS 加密传输：
+
+```bash
+mkdir -p ~/.openclaw/p2p-cert
+openssl req -x509 -newkey rsa:4096 -keyout ~/.openclaw/p2p-cert/key.pem \
+  -out ~/.openclaw/p2p-cert/cert.pem -days 3650 -nodes \
+  -subj "/CN=192.168.31.168"   # 替换为你的服务器局域网 IP 或域名
+```
+
+然后在插件配置中添加 `certPath` 和 `keyPath`：
+
+```json
+"config": {
+  "port": 18790,
+  "token": "你的密钥",
+  "certPath": "/home/<用户名>/.openclaw/p2p-cert/cert.pem",
+  "keyPath": "/home/<用户名>/.openclaw/p2p-cert/key.pem"
+}
+```
+
+证书和私钥均存在且可读时，插件自动启用 TLS——网关日志将显示 "TLS enabled — serving WSS/HTTPS"。文件缺失则自动回退到非加密模式。
+
 #### 3. 安装 Android 应用
 
 - **预编译 APK**：从 [Releases](https://github.com/imrckj1-ctrl/openclaw-p2p-project/releases) 下载直接安装。
@@ -440,7 +496,7 @@ cd ~/.openclaw/extensions/openclaw-p2p && npm install
 | 主机 | 你服务器的局域网 IP（如 `192.168.x.x`） |
 | 端口 | `18790` |
 | Token | 与网关配置中相同的密钥 |
-| SSL | 关闭（除非配置了 WSS） |
+| SSL | **开启**（服务器已配置 TLS 时——APP 自动信任自签证书） |
 
 ### 插件参数
 
@@ -452,6 +508,8 @@ cd ~/.openclaw/extensions/openclaw-p2p && npm install
 | `maxFileSize` | number | `52428800` | 文件最大字节数（50 MB） |
 | `chunkSize` | number | `65536` | 文件传输分片大小（64 KB） |
 | `offlineCacheLimit` | number | `100` | 每客户端离线消息缓存上限 |
+| `certPath` | string | `""` | TLS 证书 PEM 文件路径（启用 WSS/HTTPS） |
+| `keyPath` | string | `""` | TLS 私钥 PEM 文件路径（启用 WSS/HTTPS） |
 
 ### WebSocket 通信协议
 
@@ -511,6 +569,7 @@ cd ~/.openclaw/extensions/openclaw-p2p && npm install
 | 插件未启动 | 执行 `openclaw logs` 查看是否有 "P2P plugin started" 和端口绑定错误 |
 | 图片加载失败 | 检查媒体服务器是否可达，查看 `~/.openclaw/p2p-media/` 是否有文件 |
 | 首次回复慢 | 冷启动首次调用包含模型预热（5-8秒），后续回复应该很快 |
+| TLS 不生效 | 确认 `cert.pem` 和 `key.pem` 在配置的路径下存在，查看网关日志是否有 "TLS enabled"，确保 APP 中 SSL 开关与服务器模式一致 |
 
 ### 开发
 
