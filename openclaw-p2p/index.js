@@ -8,6 +8,7 @@
 
 const { WebSocketServer, WebSocket } = require("ws");
 const http = require("http");
+const https = require("https");
 const { randomUUID } = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -50,6 +51,36 @@ const MIME_TYPES = {
   ".mp4": "video/mp4", ".avi": "video/x-msvideo", ".mov": "video/quicktime",
 };
 let serverPort = DEFAULT_PORT;
+let tlsActive = false; // true when serving over HTTPS/WSS
+
+function getCertPath(cfg) {
+  return getConfig(cfg).certPath ?? "";
+}
+
+function getKeyPath(cfg) {
+  return getConfig(cfg).keyPath ?? "";
+}
+
+// Load TLS credentials if configured, returns null if not available
+function loadTlsCredentials(cfg) {
+  const certPath = getCertPath(cfg);
+  const keyPath = getKeyPath(cfg);
+  if (!certPath || !keyPath) return null;
+  if (!fs.existsSync(certPath)) {
+    log("warn", `TLS cert not found at ${certPath}, falling back to HTTP`);
+    return null;
+  }
+  if (!fs.existsSync(keyPath)) {
+    log("warn", `TLS key not found at ${keyPath}, falling back to HTTP`);
+    return null;
+  }
+  try {
+    return { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) };
+  } catch (err) {
+    log("error", `failed to load TLS credentials: ${err.message}`);
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -645,7 +676,8 @@ function localFileToUrl(filePath, reqHost) {
     }
   }
   const host = reqHost || `localhost:${serverPort}`;
-  return `http://${host}/media/${encodeURIComponent(fileName)}`;
+  const proto = tlsActive ? "https" : "http";
+  return `${proto}://${host}/media/${encodeURIComponent(fileName)}`;
 }
 
 async function handleMediaMessage(ws, client, msg, cfg) {
@@ -808,8 +840,11 @@ const p2pChannelPlugin = {
         log("warn", "no token configured — connections will be accepted without auth");
       }
 
-      // Create HTTP server for media file serving
-      httpServer = http.createServer((req, res) => {
+      // Try to load TLS credentials
+      const tlsCreds = loadTlsCredentials(ctx.cfg);
+
+      // Create HTTP(S) server for media file serving
+      const mediaHandler = (req, res) => {
         res.setHeader("Access-Control-Allow-Origin", "*");
         res.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
         if (req.method === "OPTIONS") { res.writeHead(204); res.end(); return; }
@@ -835,7 +870,17 @@ const p2pChannelPlugin = {
           res.writeHead(200, { "Content-Type": "text/plain" });
           res.end("IMRChat P2P Media Server");
         }
-      });
+      };
+
+      if (tlsCreds) {
+        httpServer = https.createServer(tlsCreds, mediaHandler);
+        tlsActive = true;
+        log("info", "TLS enabled — serving WSS/HTTPS");
+      } else {
+        httpServer = http.createServer(mediaHandler);
+        tlsActive = false;
+        log("info", "TLS not configured — serving WS/HTTP");
+      }
 
       // Create WebSocket server attached to HTTP server
       serverPort = port;
@@ -855,8 +900,9 @@ const p2pChannelPlugin = {
         });
         httpServer.listen(port, () => {
           wssReadyReject = null;
-          log("info", `HTTP+WebSocket server listening on port ${port}`);
-          ctx.setStatus({ running: true, port, lastStartAt: new Date().toISOString() });
+          const proto = tlsActive ? "HTTPS+WSS" : "HTTP+WS";
+          log("info", `${proto} server listening on port ${port}`);
+          ctx.setStatus({ running: true, port, tls: tlsActive, lastStartAt: new Date().toISOString() });
           resolve();
         });
       });
@@ -999,6 +1045,7 @@ function stopServer() {
     httpServer.close();
     httpServer = null;
   }
+  tlsActive = false;
   connectedClients.clear();
   offlineCache.clear();
   if (stopResolver) {

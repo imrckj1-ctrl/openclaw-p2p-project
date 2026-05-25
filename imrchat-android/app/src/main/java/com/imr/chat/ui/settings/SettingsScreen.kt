@@ -32,6 +32,7 @@ fun SettingsScreen(
     var serverHost by remember { mutableStateOf("") }
     var serverPort by remember { mutableStateOf("18790") }
     var serverToken by remember { mutableStateOf("p2p2025") }
+    var serverUseWss by remember { mutableStateOf(false) }
 
     // Load existing server if editing
     LaunchedEffect(editingIndex) {
@@ -41,11 +42,13 @@ fun SettingsScreen(
             serverHost = s.host
             serverPort = s.port.toString()
             serverToken = s.token
+            serverUseWss = s.useWss
         } else {
             serverName = ""
             serverHost = ""
             serverPort = "18790"
             serverToken = ""
+            serverUseWss = false
         }
     }
 
@@ -171,6 +174,26 @@ fun SettingsScreen(
                 }
             )
 
+            // WSS toggle
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("SSL 加密 (wss://)", style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        "使用自签证书时需先配置网关",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = serverUseWss,
+                    onCheckedChange = { serverUseWss = it }
+                )
+            }
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -181,7 +204,8 @@ fun SettingsScreen(
                             name = serverName,
                             host = serverHost,
                             port = serverPort.toIntOrNull() ?: 18790,
-                            token = serverToken
+                            token = serverToken,
+                            useWss = serverUseWss
                         )
                         if (editingIndex >= 0) {
                             viewModel.saveServer(editingIndex, server)
@@ -193,6 +217,7 @@ fun SettingsScreen(
                         serverHost = ""
                         serverPort = "18790"
                         serverToken = ""
+                        serverUseWss = false
                     },
                     modifier = Modifier.weight(1f)
                 ) {

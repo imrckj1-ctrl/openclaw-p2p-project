@@ -34,6 +34,14 @@
         "type": "number",
         "default": 100,
         "description": "离线消息缓存上限"
+      },
+      "certPath": {
+        "type": "string",
+        "description": "TLS 证书路径 (cert.pem)，配置后启用 WSS"
+      },
+      "keyPath": {
+        "type": "string",
+        "description": "TLS 私钥路径 (key.pem)，配置后启用 WSS"
       }
     }
   },
