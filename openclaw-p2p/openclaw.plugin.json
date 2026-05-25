@@ -42,6 +42,17 @@
       "keyPath": {
         "type": "string",
         "description": "TLS 私钥路径 (key.pem)，配置后启用 WSS"
+      },
+      "acl": {
+        "type": "object",
+        "description": "工具权限控制",
+        "properties": {
+          "denyTools": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "禁止使用的工具名称列表"
+          }
+        }
       }
     }
   },

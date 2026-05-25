@@ -36,8 +36,10 @@ Or build from source: `cd imrchat-android && ./gradlew assembleDebug`
 | **Thinking** | `<think>` tag parsing and streaming — AI reasoning content sent as separate `thinking_chunk` events |
 | **Media** | Built-in HTTP media server for serving uploaded images/files; supports PNG/GIF/WebP/JPEG |
 | **File Transfer** | 64KB chunked upload for large files (max 50MB per file, 10MB per image) |
-| **Offline** | Message caching for disconnected clients with configurable limit (default 100) |
-| **Security** | TLS/WSS encryption with self-signed cert support, token masked in logs, targeted message routing by client ID |
+| **Offline** | Message caching for disconnected clients with configurable limit (default 100); SQLite persistent storage survives gateway restarts |
+| **Security** | TLS/WSS encryption with self-signed cert support, ACL tool filtering, token masked in logs, targeted message routing by client ID |
+| **Store & Forward** | SQLite-backed message persistence — undelivered messages survive gateway restarts; ACK mechanism for confirmed delivery |
+| **ACL** | Tool-level access control — deny-list specific tools per channel; prevents unauthorized agent operations |
 | **Recovery** | Lazy channelRuntime recovery, graceful WebSocket close, media buffer TTL cleanup (5min) |
 
 #### Android App (Client)
@@ -218,6 +220,7 @@ In the app, go to **Settings** and add a server:
 | `offlineCacheLimit` | number | `100` | Max cached offline messages per client |
 | `certPath` | string | `""` | Path to TLS certificate PEM file (enables WSS/HTTPS) |
 | `keyPath` | string | `""` | Path to TLS private key PEM file (enables WSS/HTTPS) |
+| `acl.denyTools` | string[] | `[]` | Tool names to deny (ACL filtering) |
 
 ### WebSocket Protocol
 
@@ -328,8 +331,10 @@ OpenClaw P2P Chat 是一个基于 [OpenClaw](https://github.com/anthropics/openc
 | **思考过程** | `<think>` 标签解析，AI 推理过程以独立 `thinking_chunk` 事件流式发送 |
 | **媒体** | 内置 HTTP 媒体服务器，支持 PNG/GIF/WebP/JPEG 图片和文件外网访问 |
 | **文件传输** | 64KB 分片上传（文件最大 50MB，图片最大 10MB） |
-| **离线消息** | 断线消息缓存，重连后自动投递（默认 100 条上限） |
-| **安全** | TLS/WSS 加密传输（支持自签证书），日志 Token 脱敏、按 clientId 定向路由 |
+| **离线消息** | 断线消息缓存（SQLite 持久化），重连后自动投递，网关重启不丢失 |
+| **安全** | TLS/WSS 加密传输（支持自签证书），ACL 工具权限控制，日志 Token 脱敏、按 clientId 定向路由 |
+| **存储转发** | SQLite 持久化消息——离线消息在网关重启后依然保留；ACK 机制确保可靠投递 |
+| **ACL** | 工具级访问控制——可按通道禁止特定工具调用，防止越权操作 |
 | **容错** | channelRuntime 懒恢复、WebSocket 优雅关闭、媒体缓冲区 5 分钟 TTL 自动清理 |
 
 #### Android 应用（客户端）
@@ -510,6 +515,7 @@ openssl req -x509 -newkey rsa:4096 -keyout ~/.openclaw/p2p-cert/key.pem \
 | `offlineCacheLimit` | number | `100` | 每客户端离线消息缓存上限 |
 | `certPath` | string | `""` | TLS 证书 PEM 文件路径（启用 WSS/HTTPS） |
 | `keyPath` | string | `""` | TLS 私钥 PEM 文件路径（启用 WSS/HTTPS） |
+| `acl.denyTools` | string[] | `[]` | 禁止使用的工具名称（ACL 过滤） |
 
 ### WebSocket 通信协议
 

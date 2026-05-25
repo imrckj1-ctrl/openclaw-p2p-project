@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "ws": "^8.18.0",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "better-sqlite3": "^11.7.0"
   },
   "peerDependencies": {
     "openclaw": ">=2026.3.22"

@@ -218,17 +218,42 @@ function splitReasoningText(text) {
 function sendOfflineMessages(ws) {
   const clientId = ws._clientId;
   const cached = offlineCache.get(clientId);
-  if (!cached || cached.length === 0) return;
 
-  const count = cached.length;
+  // Also load from persistent store (survives gateway restarts)
+  const persistent = loadOfflineMessages(clientId);
+
+  // Merge: persistent first, then in-memory (dedup by msgId)
+  const seenMsgIds = new Set();
+  const allMessages = [];
+  for (const p of persistent) {
+    if (!seenMsgIds.has(p.msgId)) {
+      seenMsgIds.add(p.msgId);
+      allMessages.push({ ...p.msg, _storeRowId: p.rowId });
+    }
+  }
+  for (const msg of (cached || [])) {
+    const msgId = msg.msgId || msg.msg_id;
+    if (msgId && !seenMsgIds.has(msgId)) {
+      seenMsgIds.add(msgId);
+      allMessages.push(msg);
+    }
+  }
+
+  if (allMessages.length === 0) return;
+
+  const count = allMessages.length;
   sendJson(ws, { type: "offline_messages", count });
-  log("info", `delivering ${count} offline messages to ${clientId}`);
+  log("info", `delivering ${count} offline messages to ${clientId} (persistent=${persistent.length} cached=${cached?.length || 0})`);
 
-  for (const msg of cached) {
+  for (const msg of allMessages) {
     sendJson(ws, msg);
   }
   sendJson(ws, { type: "offline_done" });
+
+  // Clear in-memory cache
   offlineCache.delete(clientId);
+  // Mark all as delivered in persistent store
+  markAllDelivered(clientId);
 }
 
 function cacheOfflineMessage(clientId, msg) {
@@ -241,6 +266,126 @@ function cacheOfflineMessage(clientId, msg) {
   }
   cached.push(msg);
   log("info", `cached offline message for ${clientId} (queue size: ${cached.length})`);
+  // Also persist to SQLite for gateway restart survival
+  persistOfflineMessage(clientId, msg);
+}
+
+function broadcastTyping(senderId, typing) {
+  for (const [clientId, client] of connectedClients) {
+    if (clientId !== senderId && client.authenticated) {
+      sendJson(client.ws, { type: "typing", clientId: senderId, typing });
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Persistent message store (SQLite — survives gateway restarts)
+// ---------------------------------------------------------------------------
+let msgDb = null;
+
+const DB_PATH = path.join(process.env.HOME || "/tmp", ".openclaw", "p2p-store.db");
+
+function initMessageStore() {
+  try {
+    const Database = require("better-sqlite3");
+    msgDb = new Database(DB_PATH);
+    msgDb.pragma("journal_mode = WAL");
+    msgDb.exec(`
+      CREATE TABLE IF NOT EXISTS offline_messages (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        client_id TEXT NOT NULL,
+        msg_id TEXT NOT NULL,
+        msg_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        delivered INTEGER NOT NULL DEFAULT 0
+      );
+      CREATE INDEX IF NOT EXISTS idx_offline_client ON offline_messages(client_id, delivered);
+    `);
+    log("info", `persistent message store ready at ${DB_PATH}`);
+  } catch (err) {
+    log("error", `failed to open message store: ${err.message}`);
+    msgDb = null;
+  }
+}
+
+function persistOfflineMessage(clientId, msg) {
+  if (!msgDb) return;
+  try {
+    const msgId = msg.msgId || msg.msg_id || randomUUID();
+    const stmt = msgDb.prepare(
+      "INSERT INTO offline_messages (client_id, msg_id, msg_json, created_at) VALUES (?, ?, ?, ?)"
+    );
+    stmt.run(clientId, msgId, JSON.stringify(msg), Date.now());
+  } catch (err) {
+    log("error", `persistOfflineMessage: ${err.message}`);
+  }
+}
+
+function loadOfflineMessages(clientId) {
+  if (!msgDb) return [];
+  try {
+    const rows = msgDb.prepare(
+      "SELECT id, msg_id, msg_json FROM offline_messages WHERE client_id = ? AND delivered = 0 ORDER BY created_at ASC"
+    ).all(clientId);
+    return rows.map((r) => ({ rowId: r.id, msgId: r.msg_id, msg: JSON.parse(r.msg_json) }));
+  } catch (err) {
+    log("error", `loadOfflineMessages: ${err.message}`);
+    return [];
+  }
+}
+
+function markMessageDelivered(msgId) {
+  if (!msgDb || !msgId) return;
+  try {
+    msgDb.prepare("UPDATE offline_messages SET delivered = 1 WHERE msg_id = ?").run(msgId);
+  } catch (err) {
+    log("error", `markMessageDelivered: ${err.message}`);
+  }
+}
+
+function markAllDelivered(clientId) {
+  if (!msgDb) return;
+  try {
+    msgDb.prepare("UPDATE offline_messages SET delivered = 1 WHERE client_id = ? AND delivered = 0").run(clientId);
+  } catch (err) {
+    log("error", `markAllDelivered: ${err.message}`);
+  }
+}
+
+function cleanupOldMessages(maxAgeMs = 7 * 24 * 3600 * 1000) {
+  if (!msgDb) return;
+  try {
+    const cutoff = Date.now() - maxAgeMs;
+    const result = msgDb.prepare("DELETE FROM offline_messages WHERE delivered = 1 AND created_at < ?").run(cutoff);
+    if (result.changes > 0) {
+      log("info", `cleaned up ${result.changes} old delivered messages`);
+    }
+  } catch (err) {
+    log("error", `cleanupOldMessages: ${err.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// ACL (Access Control List for tool execution)
+// ---------------------------------------------------------------------------
+function getAclConfig(cfg) {
+  const pluginConfig = cfg?.plugins?.entries?.["openclaw-p2p"]?.config ?? {};
+  return pluginConfig.acl ?? {};
+}
+
+function applyAcl(aclConfig, cfg) {
+  const denyTools = aclConfig.denyTools;
+  if (!denyTools || denyTools.length === 0) return cfg;
+
+  // Filter tools.alsoAllow — remove denied tools
+  const alsoAllow = cfg?.tools?.alsoAllow;
+  if (alsoAllow && Array.isArray(alsoAllow)) {
+    const filtered = alsoAllow.filter((t) => !denyTools.includes(t));
+    cfg = { ...cfg, tools: { ...cfg.tools, alsoAllow: filtered } };
+    log("info", `ACL: denied ${alsoAllow.length - filtered.length} tools (denyList: ${denyTools.join(", ")})`);
+  }
+
+  return cfg;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +462,16 @@ async function handleMessage(ws, raw, cfg) {
 
     case "get_commands":
       sendJson(ws, { type: "commands", commands: getCommandList() });
+      break;
+
+    case "typing":
+      // Broadcast typing indicator to other connected clients
+      broadcastTyping(ws._clientId, msg.typing);
+      break;
+
+    case "ack":
+      // Client acknowledges message receipt — mark as delivered in persistent store
+      markMessageDelivered(msg.msgId);
       break;
 
     case "image":
@@ -575,7 +730,8 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
   try {
     // Build P2P-optimized config: disable thinking since reasoning stream
     // is not authorized for non-platform channels (canUseReasoningState check)
-    const p2pCfg = {
+    const aclConfig = getAclConfig(cfg);
+    const p2pCfg = applyAcl(aclConfig, {
       ...cfg,
       agents: {
         ...cfg.agents,
@@ -584,7 +740,7 @@ async function dispatchToAgent(ws, msg, cfg, ctxOverrides) {
           thinkingDefault: "off",
         },
       },
-    };
+    });
 
     const t5 = Date.now();
     log("info", `⏱️ timing: createDispatcher=${t4 - t3}ms dispatchSetup=${t5 - t4}ms`);
@@ -977,6 +1133,8 @@ const p2pChannelPlugin = {
             mediaBuffers.delete(msgId);
           }
         }
+        // Also clean up old delivered messages (once every 60s)
+        cleanupOldMessages();
       }, 60_000);
 
       // Abort signal
@@ -1048,6 +1206,11 @@ function stopServer() {
   tlsActive = false;
   connectedClients.clear();
   offlineCache.clear();
+  // Close persistent message store
+  if (msgDb) {
+    try { msgDb.close(); } catch (err) { /* ignore */ }
+    msgDb = null;
+  }
   if (stopResolver) {
     stopResolver();
     stopResolver = null;
@@ -1068,6 +1231,9 @@ const plugin = {
     if (!channelRuntime) {
       log("warn", "api.runtime.channel not available — dispatch will use echo fallback");
     }
+
+    // Initialize persistent message store
+    initMessageStore();
 
     // Register channel
     api.registerChannel({ plugin: p2pChannelPlugin });
